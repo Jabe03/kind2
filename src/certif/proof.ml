@@ -1390,19 +1390,19 @@ let construct_kind_2_proof dirname base induction implication k =
     let (defs, base_steps) = get_proof_defs base_jkind  in
     let (_, induction_steps) = get_proof_defs induction_jkind in
     let (_, implication_steps) = get_proof_defs implication_jkind in
-    let (_, jkind_defs) = factor_jkind_defs defs in
+    (* let (_, jkind_defs) = factor_jkind_defs defs in *)
 
-    let base_steps = remove_kind_2_defs base_steps in
+    (* let base_steps = remove_kind_2_defs base_steps in
     let induction_steps = remove_kind_2_defs induction_steps in
-    let implication_steps = remove_kind_2_defs implication_steps in
+    let implication_steps = remove_kind_2_defs implication_steps in *)
     (* Format.printf "Calling remove kind 2 defs\n"; *)
-    let trimmed_jkind_defs = remove_kind_2_defs jkind_defs in
+    (* let trimmed_jkind_defs = remove_kind_2_defs jkind_defs in *)
     
  let oc = open_out (dirname ^ "/frontend_proof.cpc") in
   let fmt = Format.formatter_of_out_channel oc in
     Format.printf "%s\n" dirname ;
     (* Format.printf "JKIND defs (trimmed): %a\n" pp_cpc_proof trimmed_jkind_defs; *)
-  pp_print_frontend_proof fmt trimmed_jkind_defs base_steps induction_steps implication_steps k
+  pp_print_frontend_proof fmt defs base_steps induction_steps implication_steps k
 
 let parse_cpc_file (filename : string) : cpc_step list =
   let ic = open_in filename in
@@ -1420,7 +1420,8 @@ let parse_cpc_file (filename : string) : cpc_step list =
 
   let construct_safety_proof dirname =
     let kind_2_proof = parse_cpc_file (dirname ^"/kind_2_proof.cpc") in
-    let frontend_proof = parse_cpc_file (dirname^"/frontend_proof.cpc") in
+    let (frontend_defs, frontend_proof) = get_proof_defs (parse_cpc_file (dirname^"/frontend_proof.cpc")) in
+    let frontend_defs = remove_kind_2_defs frontend_defs in
       let final_steps = [
           (mk_hardcoded_step "proof_obs");
           (mk_hardcoded_step "proof_obs_eq");
@@ -1428,7 +1429,7 @@ let parse_cpc_file (filename : string) : cpc_step list =
 
     ] in
     
-    let final_proof = List.concat [kind_2_proof; frontend_proof; final_steps] in
+    let final_proof = List.concat [kind_2_proof; frontend_defs; frontend_proof; final_steps] in
      let oc = open_out (dirname ^ "/proof.cpc") in
     let fmt = Format.formatter_of_out_channel oc in
       Format.printf "%s\n" dirname ;
