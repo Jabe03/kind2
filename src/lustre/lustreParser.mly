@@ -915,7 +915,7 @@ pexpr(Q):
   | s = ident { A.Ident (mk_pos $startpos, s) } 
 
   (* A mode reference. *)
-  | DOUBLE_COLON ; mode_ref = separated_nonempty_list(DOUBLE_COLON, ident) {
+  | DOT ; mode_ref = separated_nonempty_list(DOT, ident) {
     A.ModeRef (mk_pos $startpos, mode_ref)
   }
 

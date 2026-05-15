@@ -245,7 +245,7 @@ let pp_print_generated_identifiers ppf gids =
   let pp_print_contract_call ppf (ref, pos, scope, decl) = Format.fprintf ppf "%a := (%a, %a): %a"
     HString.pp_print_hstring ref
     pp_print_position pos
-    (pp_print_list (pp_print_pair Lib.pp_print_position NI.pp_print_node_id_user_name ":") "::") scope
+    (pp_print_list (pp_print_pair Lib.pp_print_position NI.pp_print_node_id_user_name ":") Lib.StringValues.mode_sep) scope
     (pp_print_list A.pp_print_contract_item ";") decl
   in
   let pp_print_equation ppf (_, _, lhs, expr, _) = Format.fprintf ppf "%a = %a"

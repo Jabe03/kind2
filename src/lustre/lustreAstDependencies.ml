@@ -1332,7 +1332,7 @@ let get_contract_exports: contract_summary -> LA.contract_node_equation -> LA.id
     List.map (fun (_, i, _) -> i) tis
   | LA.ContractCall (_, (cc), _, _, _) ->
      (match (NodeId.Map.find_opt cc m) with
-     | Some ids -> List.map (fun i -> HString.concat (HString.mk_hstring "::") [(NI.get_internal_name cc);i]) ids
+     | Some ids -> List.map (fun i -> HString.concat (HString.mk_hstring (Format.asprintf "%t" Lib.StringValues.pp_print_mode_sep)) [(NI.get_internal_name cc);i]) ids
      | None -> failwith ("Undeclared contract " ^ (HString.string_of_hstring (NI.get_user_name cc)) ^ ". Should not happen!"))  
  | _ -> []
 (** Traverses all the contract equations to make a contract export list. *)

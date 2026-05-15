@@ -935,7 +935,7 @@ let vars_of_clock_expr: clock_expr -> iset = function
   | ClockConstr (i1, i2) -> SI.of_list [i1; i2]
 
 let mk_mode_ref_id ids =
-  Format.asprintf "%a" (Lib.pp_print_list pp_print_ident "::") ids
+  Format.asprintf "%a" (Lib.pp_print_list pp_print_ident Lib.StringValues.mode_sep) ids
   |> HString.mk_hstring
 
 let rec vars_of_node_calls_h obs =

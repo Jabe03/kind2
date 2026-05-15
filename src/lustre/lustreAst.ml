@@ -406,8 +406,8 @@ let rec pp_print_expr ppf =
     | Ident (p, id) -> Format.fprintf ppf "%a%a" ppos p pp_print_ident id
 
     | ModeRef (p, ids) ->
-      Format.fprintf ppf "%a::%a" ppos p (
-        pp_print_list pp_print_ident "::"
+      Format.fprintf ppf "%a%t%a" ppos p Lib.StringValues.pp_print_mode_sep (
+        pp_print_list pp_print_ident Lib.StringValues.mode_sep
       ) ids
  
     | GroupExpr (p, ExprList, l) -> Format.fprintf ppf "%a@[<hv 1>(%a)@]" ppos p pl l

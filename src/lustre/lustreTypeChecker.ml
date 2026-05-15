@@ -971,7 +971,7 @@ and infer_type_expr: tc_context -> NI.t option -> LA.expr -> (tc_type * LA.expr 
     let lookup_mode_ty ctx (ids:HString.t list) =
       match ids with
       | [] -> failwith ("empty mode name")
-      | rest -> let i = HString.concat (HString.mk_hstring "::") rest in 
+      | rest -> let i = HString.concat (HString.mk_hstring (Format.asprintf "%t" Lib.StringValues.pp_print_mode_sep)) rest in 
                 match (lookup_ty ctx i) with
                 | None -> type_error pos (UnboundModeReference i)
                 | Some ty -> R.ok ty in
@@ -1459,11 +1459,11 @@ and check_type_expr: tc_context -> NI.t option -> LA.expr -> tc_type -> (LA.expr
   | ModeRef (pos, ids) ->
     let id = (match ids with
               | [] -> failwith ("empty mode name")
-              | rest -> HString.concat (HString.mk_hstring "::") rest) in
+              | rest -> HString.concat (HString.mk_hstring (Format.asprintf "%t" Lib.StringValues.pp_print_mode_sep)) rest) in
     let* i_e, warnings = check_type_expr ctx nname (LA.Ident (pos, id)) exp_ty in (
     match i_e with 
     | Ident (_, i) -> 
-      let re = Str.regexp_string "::" in
+      let re = Str.regexp_string (Format.asprintf "%t" Lib.StringValues.pp_print_mode_sep) in
       let ids = Str.split re (HString.string_of_hstring i) |> List.map HString.mk_hstring in
       R.ok (LA.ModeRef (pos, ids), warnings)
     | _ -> assert false
@@ -2098,7 +2098,7 @@ and tc_ctx_contract_eqn: tc_context -> NI.t -> LA.contract_node_equation -> (LA.
     | Some m -> 
       R.ok (eqn, 
             List.fold_left
-              (fun c (i, ty) -> add_ty c (HString.concat (HString.mk_hstring "::") [(NI.get_internal_name cc) ;i]) ty)
+              (fun c (i, ty) -> add_ty c (HString.concat (HString.mk_hstring (Format.asprintf "%t" Lib.StringValues.pp_print_mode_sep)) [(NI.get_internal_name cc) ;i]) ty)
               ctx
               (IMap.bindings m),
             []) 
@@ -2334,7 +2334,7 @@ and tc_ctx_contract_node_eqn ?(ignore_modes = false) src cname (eqns, ctx, warni
     | Some m -> 
       R.ok (eqns @ [eqn],
             List.fold_left
-              (fun c (i, ty) -> add_ty c (HString.concat (HString.mk_hstring "::") [(NI.get_internal_name cc);i]) ty)
+              (fun c (i, ty) -> add_ty c (HString.concat (HString.mk_hstring (Format.asprintf "%t" Lib.StringValues.pp_print_mode_sep)) [(NI.get_internal_name cc);i]) ty)
               ctx
               (IMap.bindings m), 
             warnings)) 
@@ -2367,7 +2367,7 @@ and extract_exports: NI.t -> tc_context -> LA.contract -> (tc_context * [> warni
         (match (lookup_contract_exports ctx cc) with
         | None -> type_error p (Impossible ("Cannot find contract " ^ (HString.string_of_hstring (NI.get_user_name cc))))
         | Some m -> R.ok (List.map
-          (fun (k, v) -> (HString.concat (HString.mk_hstring "::") [NI.get_internal_name cc;k], v))
+          (fun (k, v) -> (HString.concat (HString.mk_hstring (Format.asprintf "%t" Lib.StringValues.pp_print_mode_sep)) [NI.get_internal_name cc;k], v))
           (IMap.bindings m), []))
       | _ -> R.ok ([], []) in
     fun cname ctx (_, contract) ->

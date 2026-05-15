@@ -1519,6 +1519,8 @@ end
 
 (* Internal string values *)
 module StringValues = struct
+  let mode_sep : (unit, Format.formatter, unit) format  = "."
+  let pp_print_mode_sep ppf = Format.fprintf ppf mode_sep 
 
   let scope_sep : (unit, Format.formatter, unit) format = "."
 

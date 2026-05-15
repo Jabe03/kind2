@@ -658,6 +658,12 @@ end
 
 (** Internal string values *)
 module StringValues: sig
+
+    val mode_sep : (unit, Format.formatter, unit) format
+
+    val pp_print_mode_sep : Format.formatter -> unit
+
+
     val scope_sep : (unit, Format.formatter, unit) format
 
     val pp_print_scope_sep : Format.formatter -> unit
