@@ -184,8 +184,9 @@ let record_to_tuple assoc =
    It can return multiple variable assignements if the value is an array/record/tuple. *)
 let rec read_val ?(only_inputs = true) scope name indexes arr_indexes json sv_name_type_map =
     let svar_type : lustre_type = sv_name_type_map |> HString.HStringMap.find (HString.mk_hstring name) in
+  match json, svar_type with
+  | `Assoc lst, LustreAst.RecordType _->
     (* Can represent a record or a tuple *)
-    begin try (
       lst |>
       List.map (
         fun (str, json) ->
