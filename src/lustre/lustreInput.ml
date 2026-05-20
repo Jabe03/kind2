@@ -431,11 +431,11 @@ let of_channel only_parse in_ch =
           )
         | None -> main_nodes
       in
-      Ok (nodes, globals, main_nodes)
+      Ok (nodes, globals, main_nodes, ctx)
     in
 
     match result with
-    | Ok (nodes, globals, main_nodes) ->
+    | Ok (nodes, globals, main_nodes, ctx) ->
       let nodes = List.map (fun ({ LustreNode.node_id = id1; } as n) ->
           if List.exists (fun id2 -> NI.equal id1 id2) main_nodes then
             { n with is_main = true }
@@ -444,7 +444,7 @@ let of_channel only_parse in_ch =
       in
       print_nodes_and_globals nodes globals;
       (* Return a subsystem tree from the list of nodes *)
-      Ok (Some (LN.subsystems_of_nodes main_nodes nodes, globals, declarations))
+      Ok (Some (LN.subsystems_of_nodes main_nodes nodes, globals, declarations, ctx))
     | Error e -> Error e)
 
 

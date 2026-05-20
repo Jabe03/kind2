@@ -136,7 +136,7 @@ type error = [
 *)
 val of_file :
   bool -> string ->
-  ((LustreNode.t SubSystem.t list * LustreGlobals.t * LustreAst.t) option, [> error]) result
+  ((LustreNode.t SubSystem.t list * LustreGlobals.t * LustreAst.t * TypeCheckerContext.tc_context) option, [> error]) result
 
 (** Parse from the file, return the AST. *)
 val ast_of_file : string -> (LustreAst.t, [> error]) result

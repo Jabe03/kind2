@@ -29,6 +29,8 @@ let decimal_of_string s =
     Decimal.(div (of_string s1) (of_string s2)) |> Term.mk_dec
   | _ -> raise (Type_error (Type.mk_real (), s))
 
+
+  type lustre_type = LustreAst.lustre_type
 (* Parse one value *)
 let value_of_str ty s =
   try (
@@ -180,48 +182,44 @@ let record_to_tuple assoc =
 (* Take as input a JSON element representing the value of a variable (at a given step)
    and return the associated assignments.
    It can return multiple variable assignements if the value is an array/record/tuple. *)
-let rec read_val ?(only_inputs = true) scope name indexes arr_indexes json  =
-  match json with
-  | `Assoc lst ->
+let rec read_val ?(only_inputs = true) scope name indexes arr_indexes json sv_name_type_map =
+    let svar_type : lustre_type = sv_name_type_map |> HString.HStringMap.find (HString.mk_hstring name) in
     (* Can represent a record or a tuple *)
     begin try (
       lst |>
       List.map (
         fun (str, json) ->
-        read_val scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json
+        read_val scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json sv_name_type_map
       )
       |> List.flatten
-    )
-    with Not_an_input str -> (* If it is not a record, it must be a tuple *)
-      begin match record_to_tuple lst with
-      | None -> raise (Not_an_input str)
+  | `Assoc lst, LustreAst.TupleType _ ->
+    (* Can represent a tuple *)
+    (match record_to_tuple lst with
+      | None -> raise (Not_an_input ("Tried to parse as tuple" ^ name))
       | Some lst -> lst |> List.mapi (
             fun i json ->
-            read_val scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes json
+            read_val scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes json sv_name_type_map
           )
-          |> List.flatten 
-      end
-    end
-  | `List lst ->
-    (* Can represent an array or a tuple *)
-    begin try (
+          |> List.flatten )
+  | `List lst, LustreAst.ArrayType _ ->
+    (* Can represent an array *)
+   
       lst |>
       List.mapi (
       fun i json ->
       let new_index = LustreIndex.ArrayVarIndex (LustreExpr.mk_int_expr Numeral.one) in
-      read_val scope name (new_index::indexes) (i::arr_indexes) json
+      read_val scope name (new_index::indexes) (i::arr_indexes) json sv_name_type_map
     )
     |> List.flatten
-    )
-    with Not_an_input _ -> (* If it is not an array, it must be a tuple *)
+  | `List lst, LustreAst.TupleType _ ->
+    (* Can represent a tuple *)
       lst |> List.mapi (
             fun i json ->
-            read_val scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json
+            read_val scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json sv_name_type_map
           )
           |> List.flatten 
-      end
     
-  | json ->
+  | json, _ ->
     let indexes = List.rev indexes in
     let arr_indexes = List.rev arr_indexes in
     let full_scope = scope @ (LustreIndex.mk_scope_for_index indexes) in
@@ -296,11 +294,11 @@ let rec read_val ?(only_inputs = true) scope name indexes arr_indexes json  =
     with Invalid_argument _ -> raise (Type_mismatch full_name)
 
 (* Parse the assignments of a JSON object representing a step *)
-let read_vars ?(only_inputs=true) scope json =
-  to_assoc json |> List.map (fun (name, json) -> read_val ~only_inputs:only_inputs scope name [] [] json)
+let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
+  to_assoc json |> List.map (fun (name, json) -> read_val ~only_inputs:only_inputs scope name [] [] json sv_name_type_map)
 
 (* Parse a JSON input file *)
-let read_json_file ?(only_inputs=true) top_scope_index filename =
+let read_json_file ?(only_inputs=true) top_scope_index filename sv_name_type_map =
   let json =
     try Yojson.Safe.from_file filename with
     | Yojson.Json_error msg ->
@@ -310,16 +308,16 @@ let read_json_file ?(only_inputs=true) top_scope_index filename =
              filename msg)
   in
   json |> to_list
-  |> List.map (read_vars ~only_inputs:only_inputs top_scope_index) |> List.flatten |> group_by_var
+  |> List.map (read_vars ~only_inputs:only_inputs top_scope_index sv_name_type_map) |> List.flatten |> group_by_var
 
 
 (* ====================== GENERAL ======================== *)
 
 (* Parse a JSON or CSV input file. The format is determined from the extension. *)
-let read_file ?(only_inputs=true) top_scope_index filename =
+let read_file ?(only_inputs=true) top_scope_index filename sv_name_type_map =
   if Filename.check_suffix filename ".json"
   then
-    read_json_file ~only_inputs:only_inputs top_scope_index filename
+    read_json_file ~only_inputs:only_inputs top_scope_index filename sv_name_type_map
   else
     read_csv_file top_scope_index filename
     |> List.map (fun (sv,vs) -> ((sv,[]),vs))

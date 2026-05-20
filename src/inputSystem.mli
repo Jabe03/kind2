@@ -168,6 +168,9 @@ val current_state_props : _ t -> Scope.t -> string list
 
 val prefix_system : 'a t -> string -> 'a t
 
+val types_of_vars : 'a t -> LustreAst.lustre_type HString.HStringMap.t
+
+
 (* 
    Local Variables:
    compile-command: "make -C .. -k"

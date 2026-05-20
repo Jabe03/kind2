@@ -68,13 +68,13 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
                     LustreIdent.user_scope in
 
   let trans_svars = TransSys.state_vars trans_sys in
-  (*trans_svars |> List.iter (fun sv -> KEvent.log_uncond "%a" StateVar.pp_print_state_var sv) ;*)
+  let vars_types = input_sys |> InputSystem.types_of_vars in
 
   (* Read inputs from file *)
   let inputs =
     if input_file = "" then []
     else
-      try InputParser.read_file  ~only_inputs:(not contract_monitor) input_scope input_file
+      try InputParser.read_file  ~only_inputs:(not contract_monitor) input_scope input_file vars_types
       with Sys_error e -> 
         (* Output warning *)
         KEvent.log L_warn "@[<v>Error reading interpreter input file.@,%s@]" e;
