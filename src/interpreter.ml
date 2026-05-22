@@ -68,7 +68,13 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
                     LustreIdent.user_scope in
 
   let trans_svars = TransSys.state_vars trans_sys in
+  (* trans_svars |> List.iter (fun sv -> KEvent.log_uncond "%a" StateVar.pp_print_state_var sv) ; *)
+
+
+  trans_svars |> List.iter (fun sv -> KEvent.log_uncond "%a : %a" StateVar.pp_print_state_var sv Type.pp_print_type (StateVar.type_of_state_var sv)) ;
+
   let vars_types = input_sys |> InputSystem.types_of_vars in
+  (* List.iter (fun (id, ty) -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars; *)
 
   (* Read inputs from file *)
   let inputs =
@@ -211,7 +217,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
               (* Select index of instance variable *)
               let var = List.fold_left (
                 fun acc i ->
-                Term.mk_select acc (Term.mk_num_of_int i)
+                Term.mk_select acc (i)
               ) var indexes |> Term.convert_select in
 
               (* Constrain variable to its value at instant *)

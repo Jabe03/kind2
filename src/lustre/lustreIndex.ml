@@ -71,7 +71,7 @@ let pp_print_one_index' db = function
        | ListIndex i -> Format.fprintf ppf "_%d" i
        | ArrayIntIndex i -> Format.fprintf ppf "_%d" i
        | ArrayVarIndex _ ->  Format.fprintf ppf "_X%d" db
-       | SetMapIndex _ ->  Format.fprintf ppf "_Y%d" db 
+       | SetMapIndex _ ->  Format.fprintf ppf "_%d" db 
        | AbstractTypeIndex i -> Format.fprintf ppf ".%s" i)
 
 
