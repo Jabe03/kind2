@@ -211,7 +211,7 @@ let pp_print_lus_type_mismatch fmt (name, expected, got) =
     name LustreAst.pp_print_lustre_type expected print_got got
  
 let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json expected_type =
-  Format.printf "%a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ;
+  Format.printf "read_term: %a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ;
   match json, expected_type with
   | `Assoc lst, LustreAst.RecordType (_,_,types)->
      lst |>
@@ -331,8 +331,8 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
       | `Intlit str -> [Decimal.of_string str |> Term.mk_dec]
       | _ -> raise (Type_mismatch full_name)
       )
-    with Invalid_argument _ -> raise (Type_mismatch (Format.asprintf "%a" pp_print_type_mismatch (full_name, Type.t_bool, json))))
-    
+      with | Invalid_argument _  
+           | Not_found -> raise (Type_mismatch (Format.asprintf "%a" pp_print_type_mismatch (full_name, Type.t_bool, json))))
     (* Error match cases *)
     | json, lus_typ ->
       (* The JSON value is not of the expected type *)
@@ -341,7 +341,7 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
 
   
 let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t list) json expected_type =
-  Format.printf "%a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ;
+  Format.printf "read_val': %a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ;
   match json, expected_type with
   | `Assoc lst, LustreAst.RecordType (_,_,types)->
      lst |>
@@ -423,12 +423,12 @@ let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
             (read_term_of_val scope name [] [] y ty ) in
           ((term :: presence_i, (`Bool true)::presence_elements))
       ) ([], []) lst  in
-      
     let presences = 
           (List.map2 (
           fun index json ->
           read_val' scope name (indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
         ) new_arr_indexes presence_elements) |> List.flatten in
+      Format.printf "Presences: %a@." (Lib.pp_print_list (fun fmt ((sv, tlist), t) -> Format.fprintf fmt "SV:%a  Indexes: %a Term: %a" StateVar.pp_print_state_var sv (Lib.pp_print_list Term.pp_print_term ",") tlist  Term.pp_print_term t) ",@.") presences;
     presences
   | (`Bool _  as json), LustreAst.Bool _
   | (`String _ as json), LustreAst.Int _
