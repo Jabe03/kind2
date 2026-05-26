@@ -210,6 +210,8 @@ let pp_print_lus_type_mismatch fmt (name, expected, got) =
   Format.fprintf fmt "Type mismatch for variable %s: expected %a, got %a"
     name LustreAst.pp_print_lustre_type expected print_got got
  
+(* Reads a JSON value and converts it to a Lustre term without making a state variable.
+   This is required when we are trying to construct json values that are not state variables. *)
 let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json expected_type =
   Format.printf "read_term: %a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ;
   match json, expected_type with
@@ -299,13 +301,13 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
           read_term_of_val scope name (indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
         ) new_arr_indexes presence_elements) |> List.flatten in
     presences
-  | (`Bool _  as json), LustreAst.Bool _
-  | (`String _ as json), LustreAst.Int _
-  | (`String _ as json), LustreAst.Real _
-  | (`String _ as json), LustreAst.EnumType _
-  | (`Float _ as json), LustreAst.Real _
-  | (`Int _ as json), LustreAst.Int _
-  | (`Intlit _ as json), LustreAst.Int _-> (
+  | (`Bool _  as json), (LustreAst.Bool _ as lus_typ)
+  | (`String _ as json), (LustreAst.Int _ as lus_typ)
+  | (`String _ as json), (LustreAst.Real _ as lus_typ)
+  | (`String _ as json), (LustreAst.EnumType _ as lus_typ)
+  | (`Float _ as json), (LustreAst.Real _ as lus_typ)
+  | (`Int _ as json), (LustreAst.Int _ as lus_typ)
+  | (`Intlit _ as json), (LustreAst.Int _ as lus_typ) -> (
     let indexes = List.rev indexes in
     let indexess = List.filter
         (function 
@@ -332,7 +334,7 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
       | _ -> raise (Type_mismatch full_name)
       )
       with | Invalid_argument _  
-           | Not_found -> raise (Type_mismatch (Format.asprintf "%a" pp_print_type_mismatch (full_name, Type.t_bool, json))))
+           | Not_found -> raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (full_name, lus_typ, json))))
     (* Error match cases *)
     | json, lus_typ ->
       (* The JSON value is not of the expected type *)
@@ -440,7 +442,7 @@ let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
     let indexes = List.rev indexes in
     let arr_indexes = List.rev arr_indexes in
     let full_scope = scope @ (LustreIndex.mk_scope_for_index indexes) in
-    let indexess = List.filter
+    let indexes = List.filter
         (function 
           | LustreIndex.ArrayVarIndex _ 
           | LustreIndex.ArrayIntIndex _ 
@@ -450,7 +452,7 @@ let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
           | LustreIndex.ListIndex _
           | LustreIndex.AbstractTypeIndex _ -> true) indexes in
     let full_name =
-      Format.asprintf "%s%a" name (LustreIndex.pp_print_index true) indexess
+      Format.asprintf "%s%a" name (LustreIndex.pp_print_index true) indexes
     in
     (* StateVar.iter ((fun sv -> Format.printf "%a@." StateVar.pp_print_state_var sv)); *)
     let sv =
