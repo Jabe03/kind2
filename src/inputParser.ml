@@ -200,19 +200,28 @@ let print_got fmt = function
     | `Int i -> Format.fprintf fmt "%d" i
     | `Intlit s -> Format.fprintf fmt "%s" s
     | _ -> Format.fprintf fmt "complex JSON value"
-let pp_print_type_mismatch fmt (name, expected, got) =
- 
-  Format.fprintf fmt "Type mismatch for variable %s: expected %a, got %a"
-    name Type.pp_print_type expected print_got got
- 
+
 let pp_print_lus_type_mismatch fmt (name, expected, got) =
  
   Format.fprintf fmt "Type mismatch for variable %s: expected %a, got %a"
     name LustreAst.pp_print_lustre_type expected print_got got
- 
-(* Reads a JSON value and converts it to a Lustre term without making a state variable.
-   This is required when we are trying to construct json values that are not state variables. *)
-let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json expected_type =
+
+type sv_info = (
+  (string) *
+  (string list) *
+  (bool)
+)
+let get_svar (svar_info: sv_info) =
+let full_name,full_scope,only_inputs = svar_info in
+  let sv =
+      try (StateVar.state_var_of_string (full_name, full_scope))
+      with Not_found -> raise (Not_an_input ("State variable not found: " ^ full_name)) in
+    if (not (StateVar.is_input sv)) && only_inputs then raise (Not_an_input full_name) ;
+    Format.printf "Making sv %a@." StateVar.pp_print_state_var sv ;
+    sv
+
+(* ((sv_info * Term.t list) * Term.t) list) *)
+let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : Term.t list) json expected_type : ((sv_info * Term.t list) * Term.t) list=
   Format.printf "read_term: %a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ;
   match json, expected_type with
   | `Assoc lst, LustreAst.RecordType (_,_,types)->
@@ -227,7 +236,7 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
         in
         lookup_ident' id types
         in
-        read_term_of_val scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json (lookup_ident (HString.mk_hstring str))
+        read_term scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json (lookup_ident (HString.mk_hstring str))
       )
       |> List.flatten
   | `Assoc lst, LustreAst.TupleType (_, types) ->
@@ -236,7 +245,7 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
       | None -> raise (Not_an_input ("Tried to parse as tuple" ^ name))
       | Some lst -> (List.combine types lst) |> List.mapi (
             fun i (ty, json) ->
-            read_term_of_val scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes json ty
+            read_term scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes json ty
           )
           |> List.flatten )
   | `List lst, LustreAst.ArrayType (_, (ty,_)) ->
@@ -247,16 +256,17 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
       fun i json ->
       let new_index = LustreIndex.ArrayVarIndex (LustreExpr.mk_int_expr Numeral.one) in
       let arr_index = (Term.mk_num (Numeral.of_int i)) in
-      read_term_of_val scope name (new_index::indexes) (arr_index::arr_indexes) json ty
+      read_term scope name (new_index::indexes) (arr_index::arr_indexes) json ty
     )
     |> List.flatten
   | `List lst, LustreAst.TupleType (_, types) ->
     (* Can represent a tuple *)
       (List.combine types lst) |> List.mapi (
             fun i (ty, json) ->
-            read_term_of_val scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
+            read_term scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
           )
           |> List.flatten 
+          
   | `List lst, LustreAst.Map (_, key_type, value_type) ->
     (* Can represent a map *)
       let ((new_arr_indexes, presence_elements, binding_elements)) = 
@@ -264,10 +274,11 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
         (fun (presence_i, presence_elements, binding_elements) y -> 
           match y with 
           | `List [key;value] -> 
-            let term = List.hd (* ASSUMING KEY IS NOT ALSO A CONTAINER TYPE *)
-            (read_term_of_val scope name [] [] key key_type ) in
+            let term = match (read_term scope name [] [] key key_type ) with
+              | [(_, term)] -> term
+              | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
+            in
             ((term ::presence_i, (`Bool true)::presence_elements, value::binding_elements))
-            (* Yojson.Safe.t *)
           | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
 
         ) ([], [],[]) lst  in
@@ -276,13 +287,13 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
           (List.map2 (
           fun index json ->
           let new_index = LustreIndex.TupleIndex 1 in
-              read_term_of_val scope name (new_index::indexes) (index::arr_indexes) json value_type
+          read_term scope name (new_index::indexes) (index::arr_indexes) json value_type
         ) new_arr_indexes binding_elements) |> List.flatten in
       let presences = 
             (List.map2 (
             fun index json ->
             let new_index = LustreIndex.TupleIndex 0 in
-            read_term_of_val scope name (new_index::indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
+            read_term scope name (new_index::indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
           ) new_arr_indexes presence_elements) |> List.flatten in
       
       presences @ bindings
@@ -291,15 +302,18 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
     let ((new_arr_indexes, presence_elements)) = 
       List.fold_left 
       (fun (presence_i, presence_elements) y -> 
-          let term = List.hd (* ASSUMING KEY IS NOT ALSO A CONTAINER TYPE *)
-            (read_term_of_val scope name [] [] y ty ) in
+          let term = match (read_term scope name indexes arr_indexes y ty ) with
+            | [(_, term)] -> term
+            | _ -> raise (Not_an_input ("Container types as keys is not yet implemented " ^ name))
+          in
           ((term :: presence_i, (`Bool true)::presence_elements))
       ) ([], []) lst  in
     let presences = 
           (List.map2 (
           fun index json ->
-          read_term_of_val scope name (indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
+          read_term scope name (indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
         ) new_arr_indexes presence_elements) |> List.flatten in
+      (* Format.printf "Presences: %a@." (Lib.pp_print_list (fun fmt ((sv, tlist), t) -> Format.fprintf fmt "SV:%a  Indexes: %a Term: %a" StateVar.pp_print_state_var sv (Lib.pp_print_list Term.pp_print_term ",") tlist  Term.pp_print_term t) ",@.") presences; *)
     presences
   | (`Bool _  as json), (LustreAst.Bool _ as lus_typ)
   | (`String _ as json), (LustreAst.Int _ as lus_typ)
@@ -307,138 +321,7 @@ let rec read_term_of_val scope name indexes (arr_indexes : Term.t list) json exp
   | (`String _ as json), (LustreAst.EnumType _ as lus_typ)
   | (`Float _ as json), (LustreAst.Real _ as lus_typ)
   | (`Int _ as json), (LustreAst.Int _ as lus_typ)
-  | (`Intlit _ as json), (LustreAst.Int _ as lus_typ) -> (
-    let indexes = List.rev indexes in
-    let indexess = List.filter
-        (function 
-          | LustreIndex.ArrayVarIndex _ 
-          | LustreIndex.ArrayIntIndex _ 
-          | LustreIndex.SetMapIndex _ -> false
-          | LustreIndex.RecordIndex _
-          | LustreIndex.TupleIndex _
-          | LustreIndex.ListIndex _
-          | LustreIndex.AbstractTypeIndex _ -> true) indexes in
-    let full_name =
-      Format.asprintf "%s%a" name (LustreIndex.pp_print_index true) indexess
-    in
-    (* StateVar.iter ((fun sv -> Format.printf "%a@." StateVar.pp_print_state_var sv)); *)
-    (* Is a numeral in the range of a type? *)
-    try (
-      match json with
-
-      | `Bool b -> [Term.mk_bool b]
-      | `String str -> [Term.mk_constr str]
-      | `Float f -> [string_of_float f |> Decimal.of_string |> Term.mk_dec]
-      | `Int i -> [Decimal.of_int i |> Term.mk_dec]
-      | `Intlit str -> [Decimal.of_string str |> Term.mk_dec]
-      | _ -> raise (Type_mismatch full_name)
-      )
-      with | Invalid_argument _  
-           | Not_found -> raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (full_name, lus_typ, json))))
-    (* Error match cases *)
-    | json, lus_typ ->
-      (* The JSON value is not of the expected type *)
-      raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (name, lus_typ, json)))
-
-
-  
-let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t list) json expected_type =
-  Format.printf "read_val': %a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ;
-  match json, expected_type with
-  | `Assoc lst, LustreAst.RecordType (_,_,types)->
-     lst |>
-      List.map (
-        fun (str, json) ->
-        let lookup_ident id = 
-          let rec lookup_ident' id rest = match rest with 
-          |[] -> failwith "Identifier not found" 
-          | (_, tid, ty) :: _ when id = tid -> ty 
-          | _ :: rest -> lookup_ident' id rest
-        in
-        lookup_ident' id types
-        in
-        read_val' scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json (lookup_ident (HString.mk_hstring str))
-      )
-      |> List.flatten
-  | `Assoc lst, LustreAst.TupleType (_, types) ->
-    (* Can represent a tuple *)
-    (match record_to_tuple lst with
-      | None -> raise (Not_an_input ("Tried to parse as tuple" ^ name))
-      | Some lst -> (List.combine types lst) |> List.mapi (
-            fun i (ty, json) ->
-            read_val' scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes json ty
-          )
-          |> List.flatten )
-  | `List lst, LustreAst.ArrayType (_, (ty,_)) ->
-    (* Can represent an array *)
-   
-      lst |>
-      List.mapi (
-      fun i json ->
-      let new_index = LustreIndex.ArrayVarIndex (LustreExpr.mk_int_expr Numeral.one) in
-      let arr_index = (Term.mk_num (Numeral.of_int i)) in
-      read_val' scope name (new_index::indexes) (arr_index::arr_indexes) json ty
-    )
-    |> List.flatten
-  | `List lst, LustreAst.TupleType (_, types) ->
-    (* Can represent a tuple *)
-      (List.combine types lst) |> List.mapi (
-            fun i (ty, json) ->
-            read_val' scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
-          )
-          |> List.flatten 
-  | `List lst, LustreAst.Map (_, key_type, value_type) ->
-    (* Can represent a map *)
-      let ((new_arr_indexes, presence_elements, binding_elements)) = 
-        List.fold_left 
-        (fun (presence_i, presence_elements, binding_elements) y -> 
-          match y with 
-          | `List [key;value] -> 
-            let term = List.hd (* ASSUMING KEY IS NOT ALSO A CONTAINER TYPE *)
-            (read_term_of_val scope name [] [] key key_type ) in
-            ((term ::presence_i, (`Bool true)::presence_elements, value::binding_elements))
-            (* Yojson.Safe.t *)
-          | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
-
-        ) ([], [],[]) lst  in
-      
-      let bindings = 
-          (List.map2 (
-          fun index json ->
-          let new_index = LustreIndex.TupleIndex 1 in
-          read_val' scope name (new_index::indexes) (index::arr_indexes) json value_type
-        ) new_arr_indexes binding_elements) |> List.flatten in
-      let presences = 
-            (List.map2 (
-            fun index json ->
-            let new_index = LustreIndex.TupleIndex 0 in
-            read_val' scope name (new_index::indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
-          ) new_arr_indexes presence_elements) |> List.flatten in
-      
-      presences @ bindings
-  | `List lst, LustreAst.Set (_, ty) ->
-    (* Can represent a set *)
-    let ((new_arr_indexes, presence_elements)) = 
-      List.fold_left 
-      (fun (presence_i, presence_elements) y -> 
-          let term = List.hd (* ASSUMING KEY IS NOT ALSO A CONTAINER TYPE *)
-            (read_term_of_val scope name [] [] y ty ) in
-          ((term :: presence_i, (`Bool true)::presence_elements))
-      ) ([], []) lst  in
-    let presences = 
-          (List.map2 (
-          fun index json ->
-          read_val' scope name (indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
-        ) new_arr_indexes presence_elements) |> List.flatten in
-      Format.printf "Presences: %a@." (Lib.pp_print_list (fun fmt ((sv, tlist), t) -> Format.fprintf fmt "SV:%a  Indexes: %a Term: %a" StateVar.pp_print_state_var sv (Lib.pp_print_list Term.pp_print_term ",") tlist  Term.pp_print_term t) ",@.") presences;
-    presences
-  | (`Bool _  as json), LustreAst.Bool _
-  | (`String _ as json), LustreAst.Int _
-  | (`String _ as json), LustreAst.Real _
-  | (`String _ as json), LustreAst.EnumType _
-  | (`Float _ as json), LustreAst.Real _
-  | (`Int _ as json), LustreAst.Int _
-  | (`Intlit _ as json), LustreAst.Int _-> (
+  | (`Intlit _ as json), (LustreAst.Int _ as lus_typ)-> (
     let indexes = List.rev indexes in
     let arr_indexes = List.rev arr_indexes in
     let full_scope = scope @ (LustreIndex.mk_scope_for_index indexes) in
@@ -454,16 +337,37 @@ let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
     let full_name =
       Format.asprintf "%s%a" name (LustreIndex.pp_print_index true) indexes
     in
-    (* StateVar.iter ((fun sv -> Format.printf "%a@." StateVar.pp_print_state_var sv)); *)
-    let sv =
-      try (StateVar.state_var_of_string (full_name, full_scope))
-      with Not_found -> raise (Not_an_input ("State variable not found: " ^ full_name)) in
-    if (not (StateVar.is_input sv)) && only_inputs then raise (Not_an_input full_name) ;
-    let typ = StateVar.type_of_state_var sv in
-    Format.printf "Making sv %a@." StateVar.pp_print_state_var sv ;
-    let sv = (sv, arr_indexes) in
 
-    (* Is a numeral in the range of a type? *)
+    let svar_info : sv_info = (full_name, full_scope, only_inputs) in
+    let name_indexes = (svar_info, arr_indexes) in
+    (* Extract the type of an element of an array (and check the ranges) *)
+    try (
+      match lus_typ, json with
+
+      | EnumType _, `String str ->
+        [name_indexes, Term.mk_constr str]
+      | Bool _ , `Bool b -> [name_indexes, Term.mk_bool b]
+      | Real _, `Float f -> [name_indexes, string_of_float f |> Decimal.of_string |> Term.mk_dec]
+      | Real _, `Int i -> [name_indexes, Decimal.of_int i |> Term.mk_dec]
+      | Real _, `String str -> [name_indexes, decimal_of_string str]
+      | Real _, `Intlit str -> [name_indexes, Decimal.of_string str |> Term.mk_dec]
+      | _, `Int i -> [name_indexes, Term.mk_num_of_int i]
+
+      | _, `Intlit str 
+      | _, `String str  ->
+        [name_indexes, Numeral.of_string str |> Term.mk_num]
+
+      | _ -> raise (Type_mismatch ("Reading leaf " ^ full_name))
+      )
+    with Invalid_argument _ -> raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (full_name, lus_typ, json))))
+    (* Error match cases *)
+    | json, lus_typ ->
+      (* The JSON value is not of the expected type *)
+      raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (name, lus_typ, json)))
+
+  (*  
+
+      (* Is a numeral in the range of a type? *)
     let is_in_range n t =
       match Type.node_of_type t with
       | Int -> true
@@ -478,13 +382,17 @@ let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
     (* Is an integer in the range of a type? *)
     let is_in_range_i i = is_in_range (Numeral.of_int i) in
 
+    let sv = get_svar (full_name, full_scope, only_inputs, arr_indexes) in
+    let typ = StateVar.type_of_state_var sv in
+    let sv = (sv, arr_indexes) in
+
     (* Extract the type of an element of an array (and check the ranges) *)
     let rec extract_element_type arr_indexes typ =
       match arr_indexes, Type.node_of_type typ with
       | [], _ -> typ
       | _::arr_indexes, Array (elt, _) (*when is_in_range_i i t*)  ->
         extract_element_type arr_indexes elt
-      | _, _ -> raise (Type_mismatch full_name)
+      | _, _ -> raise (Type_mismatch ("Extract_element_type:" ^ full_name))
     in
     let typ = extract_element_type arr_indexes typ in
     let ktype = Type.node_of_type typ in
@@ -492,21 +400,20 @@ let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
       let open Type in
       match ktype, json with
 
-      | Bool, `Bool b -> [sv, Term.mk_bool b]
-
       | Enum _, `String str when equal_types (enum_of_constr str) typ ->
         [sv, Term.mk_constr str]
-
+      | Bool, `Bool b -> [sv, Term.mk_bool b]
       | Real, `Float f -> [sv, string_of_float f |> Decimal.of_string |> Term.mk_dec]
       | Real, `Int i -> [sv, Decimal.of_int i |> Term.mk_dec]
       | Real, `String str -> [sv, decimal_of_string str]
       | Real, `Intlit str -> [sv, Decimal.of_string str |> Term.mk_dec]
-      | _, `Int i when is_in_range_i i typ ->
-        [sv, Term.mk_num_of_int i]
-      | _, `Intlit str | _, `String str when is_in_range (Numeral.of_string str) typ ->
+      | _, `Int i when is_in_range_i i typ -> [sv, Term.mk_num_of_int i]
+
+      | _, `Intlit str 
+      | _, `String str when is_in_range (Numeral.of_string str) typ ->
         [sv, Numeral.of_string str |> Term.mk_num]
 
-      | _ -> raise (Type_mismatch full_name)
+      | _ -> raise (Type_mismatch ("Reading leaf " ^ full_name))
       )
     with Invalid_argument _ -> raise (Type_mismatch (Format.asprintf "%a" pp_print_type_mismatch (full_name, typ, json))))
     
@@ -514,15 +421,15 @@ let rec read_val' ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
     | json, lus_typ ->
       (* The JSON value is not of the expected type *)
       raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (name, lus_typ, json)))
-
-
+*)
 
 let read_val ?(only_inputs = true) scope name indexes (arr_indexes : Term.t list) json sv_name_type_map =
-    let svar_type : lustre_type = sv_name_type_map |> HString.HStringMap.find (HString.mk_hstring name)
+    let expected_type : lustre_type = sv_name_type_map |> HString.HStringMap.find (HString.mk_hstring name)
   in
 
-  read_val' ~only_inputs:only_inputs scope name indexes arr_indexes json svar_type
-  
+  read_term ~only_inputs:only_inputs scope name indexes arr_indexes json expected_type |> 
+    List.map (fun ((svar_info, arr_indexes), term) -> 
+    ((get_svar svar_info, arr_indexes), term))  
 (* Parse the assignments of a JSON object representing a step *)
 let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
   to_assoc json |> List.map (fun (name, json) -> read_val ~only_inputs:only_inputs scope name [] [] json sv_name_type_map)
