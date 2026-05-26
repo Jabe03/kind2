@@ -239,15 +239,6 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
         read_term scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json (lookup_ident (HString.mk_hstring str))
       )
       |> List.flatten
-  | `Assoc lst, LustreAst.TupleType (_, types) ->
-    (* Can represent a tuple *)
-    (match record_to_tuple lst with
-      | None -> raise (Not_an_input ("Tried to parse as tuple" ^ name))
-      | Some lst -> (List.combine types lst) |> List.mapi (
-            fun i (ty, json) ->
-            read_term scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes json ty
-          )
-          |> List.flatten )
   | `List lst, LustreAst.ArrayType (_, (ty,_)) ->
     (* Can represent an array *)
    
@@ -266,7 +257,7 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
             read_term scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
           )
           |> List.flatten 
-          
+
   | `List lst, LustreAst.Map (_, key_type, value_type) ->
     (* Can represent a map *)
       let ((new_arr_indexes, presence_elements, binding_elements)) = 
