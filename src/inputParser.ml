@@ -312,7 +312,8 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
   | (`String _ as json), (LustreAst.EnumType _ as lus_typ)
   | (`Float _ as json), (LustreAst.Real _ as lus_typ)
   | (`Int _ as json), (LustreAst.Int _ as lus_typ)
-  | (`Intlit _ as json), (LustreAst.Int _ as lus_typ)-> (
+  | (`Intlit _ as json), (LustreAst.Int _ as lus_typ)
+  | json, (LustreAst.RefinementType (_,_,_) as lus_typ) -> (
     let indexes = List.rev indexes in
     let arr_indexes = List.rev arr_indexes in
     let full_scope = scope @ (LustreIndex.mk_scope_for_index indexes) in
@@ -350,11 +351,12 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
 
       | _ -> raise (Type_mismatch ("Reading leaf " ^ full_name))
       )
-    with Invalid_argument _ -> raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (full_name, lus_typ, json))))
+    with | Invalid_argument _ -> raise (Type_mismatch (Format.asprintf "Invalid arg %a" pp_print_lus_type_mismatch (full_name, lus_typ, json)))
+         | Not_found -> raise (Type_mismatch (Format.asprintf "not found %a" pp_print_lus_type_mismatch (full_name, lus_typ, json))))
     (* Error match cases *)
-    | json, lus_typ ->
-      (* The JSON value is not of the expected type *)
-      raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (name, lus_typ, json)))
+  | json, lus_typ ->
+    (* The JSON value is not of the expected type *)
+    raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (name, lus_typ, json)))
 
   (*  
 
@@ -417,10 +419,13 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : Term.t
 let read_val ?(only_inputs = true) scope name indexes (arr_indexes : Term.t list) json sv_name_type_map =
     let expected_type : lustre_type = sv_name_type_map |> HString.HStringMap.find (HString.mk_hstring name)
   in
-
   read_term ~only_inputs:only_inputs scope name indexes arr_indexes json expected_type |> 
     List.map (fun ((svar_info, arr_indexes), term) -> 
-    ((get_svar svar_info, arr_indexes), term))  
+      (* Need to also implement the state-var-level checks that are commented above 
+      Need reftype bounds checks (This was not implemented before)
+      Need enum checks (this should already be implemented at lustre type level) *)
+      ((get_svar svar_info, arr_indexes), term)
+    )  
 (* Parse the assignments of a JSON object representing a step *)
 let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
   to_assoc json |> List.map (fun (name, json) -> read_val ~only_inputs:only_inputs scope name [] [] json sv_name_type_map)
