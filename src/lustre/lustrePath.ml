@@ -1798,32 +1798,50 @@ let rec pp_print_type_json ?state_var ?model field ppf stream_type =
   )
   | Type.Array _ -> (
     let base_type = Type.last_elem_type_of_array stream_type in
-    let sizes =
       match state_var, model with
       | Some sv, Some m when SVT.mem m sv ->
+        let key_type, value_type = Type.last_two_types_of_array stream_type in
         let stream_values = SVT.find m sv in
         (match stream_values with
         | Model.Map map :: _ ->
-          Model.dimension_of_map map |> List.map string_of_int
+                Format.fprintf ppf
+              "\"type\" : \"Map\",@,\
+              \"typeInfo\" :@,{@[<v 1>@,\
+              %a\
+              %a\
+              @]@,},@,\
+              "
+              (pp_print_type_json "keyType") key_type
+              (pp_print_type_json "valueType") value_type
+        
         | _ -> 
-          Type.all_index_types_of_array stream_type |>
+          let sizes = Type.all_index_types_of_array stream_type |>
           List.map Type.node_of_type |>
           List.map (function
             | Type.IntRange (_, Some j) ->
               Numeral.string_of_numeral j
             | _ -> assert false
-          )
-        )
+          ) in 
+           Format.fprintf ppf
+            "\"type\" : \"array\",@,\
+            \"typeInfo\" :@,{@[<v 1>@,\
+            %a\
+            \"sizes\" : [%a]\
+            @]@,},@,\
+            "
+            (pp_print_type_json "baseType") base_type
+            (pp_print_list Format.pp_print_string ", ") sizes
+            )
+        
       | _ ->
-        Type.all_index_types_of_array stream_type |>
+        let sizes = Type.all_index_types_of_array stream_type |>
         List.map Type.node_of_type |>
         List.map (function
           | Type.IntRange (_, Some j) ->
             Numeral.string_of_numeral j
-          | _ -> assert false
-        )
-    in
-    Format.fprintf ppf
+          | _ -> assert false  )
+        in
+          Format.fprintf ppf
         "\"type\" : \"array\",@,\
          \"typeInfo\" :@,{@[<v 1>@,\
          %a\
@@ -1832,7 +1850,8 @@ let rec pp_print_type_json ?state_var ?model field ppf stream_type =
         "
         (pp_print_type_json "baseType") base_type
         (pp_print_list Format.pp_print_string ", ") sizes
-  )
+        )
+    
 
 let pp_print_section_json sect ppf mode_traces  =
   match mode_traces with 
@@ -1863,8 +1882,8 @@ let pp_print_section_json sect ppf mode_traces  =
     
 (* Pretty-print a single stream *)
 let pp_print_stream_json node model clock ppf (index, state_var) =
-  try
-    let stream_values = SVT.find model state_var in
+  
+    let stream_values = try SVT.find model state_var with Not_found -> [] in
     let stream_type = StateVar.type_of_state_var state_var in
     Format.fprintf ppf
       "@,{@[<v 1>@,\
@@ -1885,8 +1904,6 @@ let pp_print_stream_json node model clock ppf (index, state_var) =
            (pp_print_stream_values_json clock stream_type)
            stream_values
       )
-
-  with Not_found -> assert false
 
 let pp_print_streams_json node model clock ppf = function
   | [] -> ()
@@ -2009,7 +2026,7 @@ let pp_print_streams_json_testgen ppf
 
   let streams_with_values =
     streams
-    |> List.map (fun (_, sv) -> SVT.find model sv)
+    |> List.map (fun (_, sv) -> try SVT.find model sv with Not_found -> [])
     |> transpose
   in
 

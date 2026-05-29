@@ -218,6 +218,8 @@ val idx_type_of_array : t -> t
 (** Return all array index types of a nested array type *)
 val last_elem_type_of_array : t -> t
 
+(** Return the last two types of a nested array type *)
+val last_two_types_of_array : t -> t * t
 (** {1 Enumerated datatypes } *)
 
 (** Return constructors of an enumerated datatype *)

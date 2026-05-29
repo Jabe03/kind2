@@ -139,7 +139,7 @@ module LHS =
 struct
   type t = assignment_lhs
   let compare (a,b) (a',b') =
-    let compare_ele (term, idx) (term', idx') = Term.compare term term' in
+    let compare_ele (term, _) (term', _) = Term.compare term term' in
     match StateVar.compare_state_vars a a' with
     | 0 -> List.compare compare_ele b b'
     | i -> i
