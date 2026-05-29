@@ -68,10 +68,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
                     LustreIdent.user_scope in
 
   let trans_svars = TransSys.state_vars trans_sys in
-  (* trans_svars |> List.iter (fun sv -> KEvent.log_uncond "%a" StateVar.pp_print_state_var sv) ; *)
-
-
-  trans_svars |> List.iter (fun sv -> KEvent.log_uncond "%a : %a" StateVar.pp_print_state_var sv Type.pp_print_type (StateVar.type_of_state_var sv)) ;
+  (*trans_svars |> List.iter (fun sv -> KEvent.log_uncond "%a : %a" StateVar.pp_print_state_var sv Type.pp_print_type (StateVar.type_of_state_var sv)) ; *)
 
   let vars_types = input_sys |> InputSystem.types_of_vars in
   (* List.iter (fun (id, ty) -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars; *)
@@ -92,7 +89,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
   (* Check that constant inputs are indeed constant. *)
   inputs |> List.iter (
     function
-    | ((sv, _), head :: tail) when StateVar.is_const sv ->
+    | ((sv, _), (head :: tail)) when StateVar.is_const sv ->
       tail |> List.fold_left (
         fun acc value ->
           if acc != value then (
@@ -193,7 +190,14 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
 
   (* Assert transition relation up to number of steps *)
   assert_trans solver trans_sys (Numeral.of_int steps);
-
+  let module IntMap = Map.Make(Int) in
+  let defined_indexes : (((Term.t list) StateVar.StateVarMap.t) IntMap.t )ref = ref IntMap.empty in
+  let add_defined_index instant state_var indexes = 
+      let instant_map = try IntMap.find instant !defined_indexes with Not_found -> StateVar.StateVarMap.empty in
+      let old_idxs = try StateVar.StateVarMap.find state_var instant_map with Not_found -> [] in
+      let new_idxs = StateVar.StateVarMap.add state_var (indexes :: old_idxs) instant_map in
+      defined_indexes := IntMap.add instant new_idxs !defined_indexes
+  in
   (* Assert equation of state variable and its value at each
      instant *)
   List.iter
@@ -215,8 +219,10 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
               in
 
               (* Select index of instance variable *)
+              (* Constrain variable to its value at instant *)
               let var = List.fold_left (
-                fun acc i ->
+                fun acc (i, idx_ty) ->
+                  if idx_ty = InputParser.SetMapPresenceIndex then add_defined_index instant state_var i;
                 Term.mk_select acc (i)
               ) var indexes |> Term.convert_select in
 
@@ -233,6 +239,36 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
 
     inputs;
 
+  (* Assert set and map presence *)
+  IntMap.iter (fun instant state_var_map ->
+    StateVar.StateVarMap.iter (fun state_var indexes -> (
+      (* Format.printf  "Making forall for: %a: %a@." StateVar.pp_print_state_var state_var
+          (Lib.pp_print_list (
+            fun ppf i -> Format.fprintf ppf "%a" Term.pp_print_term i
+          ) ", ") indexes ; *)
+      let idx_var = Var.mk_fresh_var (Type.mk_int ()) in
+      let mk_forall tm = Term.mk_forall [idx_var] tm in
+      
+      let var = Var.mk_state_var_instance 
+                  state_var 
+                  (Numeral.of_int instant)
+                |> Term.mk_var
+      in
+              
+        let var = Term.mk_select var (Term.mk_var idx_var) |> Term.convert_select in
+                
+        (* Format.printf "Var created: %a@." Term.pp_print_term var; *)
+        let equation = 
+          Term.mk_eq [var; Term.mk_false ()] 
+        in
+        let body = Term.mk_or (equation :: (List.map (fun idx -> Term.mk_eq [idx ; (Term.mk_var idx_var)]) indexes )) in
+        let equation = mk_forall body in
+        (* Format.printf "Asserting equation for %a: %a. var was %a@."
+                  StateVar.pp_print_state_var state_var
+                  Term.pp_print_term equation
+                  Term.pp_print_term var; *)
+        SMTSolver.assert_term solver equation
+    )) state_var_map )!defined_indexes;
   KEvent.log L_info 
     "Parsing interpreter input file %s"
     (Flags.input_file ()); 

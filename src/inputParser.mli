@@ -18,8 +18,8 @@
 
 (** Represents the lhs of an assignment. For non-array state vars, the index list is empty. 
     For array state vars, the index list indicates which cell of the array must be assigned. *)
-type assignment_lhs = StateVar.t * Term.t list
-
+type assignment_lhs = StateVar.t * (Term.t * index_type) list
+and index_type = | ArrayIndex | SetMapPresenceIndex | SetMapBindingIndex
 (** Parse a JSON or CSV input file. The format is determined from the extension. *)
 val read_file: ?only_inputs:bool -> string list -> string -> LustreAst.lustre_type HString.HStringMap.t -> (assignment_lhs * (Term.t list)) list
 
