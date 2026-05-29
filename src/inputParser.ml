@@ -169,18 +169,6 @@ let group_by_var lst =
 exception Not_an_input of string
 exception Type_mismatch of string
 
-let pp_print_call_context fmt (scope, name, indexes, arr_indexes, json, svar_type) =
-  Format.fprintf fmt "Context for variable (%s : %a): scope [%a], indexes [%a], array indexes [%a], json value %a@."
-    name
-    LustreAst.pp_print_lustre_type svar_type
-    (Lib.pp_print_list (Format.pp_print_string) ",") scope
-    (Lib.pp_print_list (LustreIndex.pp_print_one_index true) ",") indexes
-    (Lib.pp_print_list Term.pp_print_term ",") arr_indexes
-    (Yojson.Safe.pretty_print ~std:true) json
-(* Take as input a JSON element representing the value of a variable (at a given step)
-   and return the associated assignments.
-   It can return multiple variable assignements if the value is an array/record/tuple. *)
-    
 
 
 let print_got fmt = function
@@ -208,15 +196,20 @@ let full_name,full_scope,only_inputs = svar_info in
       with Not_found -> raise (Not_an_input ("State variable not found: " ^ full_name)) in
     if (not (StateVar.is_input sv)) && only_inputs then raise (Not_an_input full_name) ;
     sv
-
-(* ((sv_info * Term.t list) * Term.t) list) *)
+(* Take as input a JSON element representing the value of a variable (at a given step)
+   and return the associated assignments.
+   It can return multiple variable assignements if the value is an array/record/tuple. *)
+    
 let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.t * index_type) list) json expected_type : ((sv_info * (Term.t * index_type) list) * Term.t) list=
   (* Format.printf "read_term: %a" pp_print_call_context (scope, name, indexes, arr_indexes, json, expected_type) ; *)
   match json, expected_type with
   | `Assoc lst, LustreAst.RecordType (_,_,types)->
+    let seen = ref [] in
      lst |>
       List.map (
         fun (str, json) ->
+        if List.exists (fun s -> s = str) !seen then raise (Not_an_input ("Duplicate field in record " ^ name)) ;
+          seen := str :: !seen ;
         let lookup_ident id = 
           let rec lookup_ident' id rest = match rest with 
           |[] -> failwith "Identifier not found" 
@@ -228,9 +221,12 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
         read_term scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json (lookup_ident (HString.mk_hstring str))
       )
       |> List.flatten
-  | `List lst, LustreAst.ArrayType (_, (ty,_)) ->
+  | `List lst, LustreAst.ArrayType (_, (ty,expr)) ->
     (* Can represent an array *)
-   
+      (match expr with
+      |Const (_,(Num v)) -> 
+        if HString.equal ((List.length lst) |> Int.to_string |> HString.mk_hstring) v |> not then raise (Not_an_input ("Array " ^ name ^ " has incorrect length"))
+      | _ -> ());
       lst |>
       List.mapi (
       fun i json ->
@@ -241,12 +237,12 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
     |> List.flatten
   | `List lst, LustreAst.TupleType (_, types) ->
     (* Can represent a tuple *)
-      (List.combine types lst) |> List.mapi (
+      (try (List.combine types lst) |> List.mapi (
             fun i (ty, json) ->
             read_term scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
           )
           |> List.flatten 
-
+      with Invalid_argument _ -> raise (Not_an_input ("Tuple " ^ name ^ " has incorrect length")))
   | `List lst, LustreAst.Map (_, key_type, value_type) ->
     (* Can represent a map *)
       let ((new_arr_indexes, presence_elements, binding_elements)) = 
@@ -258,6 +254,8 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
               | [(_, term)] -> term
               | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
             in
+            if List.exists (fun t -> Term.equal t term) presence_i then raise (Not_an_input ("Multiple occurrences of key in map " ^ name)) ;
+
             ((term ::presence_i, (`Bool true)::presence_elements, value::binding_elements))
           | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
 
@@ -288,6 +286,7 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
             | [(_, term)] -> term
             | _ -> raise (Not_an_input ("Container types as keys is not yet implemented " ^ name))
           in
+          if List.exists (fun (t, _) -> Term.equal t term) presence_i then raise (Not_an_input ("Duplicate element in set " ^ name)) ;
           (((term, SetMapPresenceIndex) ::presence_i, (`Bool true)::presence_elements))
       ) ([], []) lst  in
     let presences = 
