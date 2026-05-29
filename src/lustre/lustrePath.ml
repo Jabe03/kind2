@@ -363,11 +363,12 @@ let guarantees_of_instances model_top instances = function
   (* Contract with some modes. *)
   | Some { C.guarantees } -> 
     let trace_of_req sv =
-      map_top instances sv
+      (try map_top instances sv
       |> SVT.find model_top
       |> List.map (function
         | Model.Term t -> t == Term.t_true
         | _ -> failwith "evaluating mode requirement: value should be a term")
+      with Not_found -> [])
     in
     let mk_term_t_or_f b =
       if b then Term.mk_true () else Term.mk_false ()
@@ -391,12 +392,13 @@ let assumptions_of_instances model_top instances = function
   | None | Some { C.assumes = [] } -> []
   (* Contract with some modes. *)
   | Some { C.assumes } -> 
-    let trace_of_req sv =
-      map_top instances sv
+     let trace_of_req sv =
+      (try map_top instances sv
       |> SVT.find model_top
       |> List.map (function
         | Model.Term t -> t == Term.t_true
         | _ -> failwith "evaluating mode requirement: value should be a term")
+    with Not_found -> [])
     in
     let mk_term_t_or_f b =
       if b then Term.mk_true () else Term.mk_false ()
@@ -420,11 +422,12 @@ let mode_requires_of_instances model_top instances = function
   (* Contract with some modes. *)
   | Some { C.modes } ->
     let trace_of_req { C.svar } =
-      map_top instances svar
+      (try map_top instances svar
       |> SVT.find model_top
       |> List.map (function
         | Model.Term t -> t == Term.t_true
         | _ -> failwith "evaluating mode requirement: value should be a term")
+      with Not_found -> [])
     in
 
     let merge_req_traces t1 t2 =
@@ -473,11 +476,12 @@ let mode_ensures_of_instances model_top instances = function
   (* Contract with some modes. *)
   | Some { C.modes } ->
     let trace_of_req { C.svar } =
-      map_top instances svar
+      (try map_top instances svar
       |> SVT.find model_top
       |> List.map (function
         | Model.Term t -> t == Term.t_true
         | _ -> failwith "evaluating mode requirement: value should be a term")
+      with Not_found -> [])
     in
 
     let merge_req_traces t1 t2 =
