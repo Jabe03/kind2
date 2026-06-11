@@ -72,7 +72,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
 
   let vars_types = input_sys |> InputSystem.types_of_vars in
   (* List.iter (fun (id, ty) -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars; *)
-
+  HString.HStringMap.iter (fun id ty -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars_types;
   (* Read inputs from file *)
   let inputs =
     if input_file = "" then []

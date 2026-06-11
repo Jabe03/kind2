@@ -1394,7 +1394,7 @@ let cex_json ?(wa_model=[]) mdl level input_sys analysis trans_sys prop cex disp
 
 (* Output execution path without slicing as JSON *)
 let execution_path_json level input_sys trans_sys path=
-      Format.printf "@.@.@.@.Trace is %a@." (Lib.pp_print_list (fun ppf (sv, values) -> 
+      (* Format.printf "@.@.@.@.Trace is %a@." (Lib.pp_print_list (fun ppf (sv, values) -> 
          
           Format.fprintf ppf "%a -> [%a]" StateVar.pp_print_state_var sv (Lib.pp_print_list 
           (fun ppf value ->  match value with 
@@ -1404,7 +1404,7 @@ let execution_path_json level input_sys trans_sys path=
           ", ") 
           values)
           ",@,"
-          ) path;
+          ) path; *)
   (ignore_or_fprintf level)
     !log_ppf
     ",@.{@[<v 1>@,\

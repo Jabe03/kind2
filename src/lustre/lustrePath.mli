@@ -36,12 +36,12 @@ val pp_print_path_pt :
 
 (** Output a counterexample as a Lustre execution in JSON format *)
 val pp_print_path_json :
-  TransSys.t ->
+  TransSys.t -> LustreNodeGen.sv_source StateVar.StateVarHashtbl.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
   Format.formatter -> Model.path -> unit
 
 val pp_print_path_json_testgen :
-  TransSys.t ->
+  TransSys.t -> LustreNodeGen.sv_source StateVar.StateVarHashtbl.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
   Format.formatter -> Model.path -> unit
 

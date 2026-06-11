@@ -316,7 +316,7 @@ let of_channel only_parse in_ch =
   else (
     let result =
       let* (ctx, gids, decls, toplevel_nodes, _) = type_check declarations in
-      let nodes, globals = LNG.compile ctx gids decls in
+      let nodes,sv_source_types,globals = LNG.compile ctx gids decls in
       let contractck_enabled = List.mem `CONTRACTCK (Flags.enabled ()) in
       let main_nodes = match Flags.lus_main () with
         | Some s -> 
@@ -431,11 +431,11 @@ let of_channel only_parse in_ch =
           )
         | None -> main_nodes
       in
-      Ok (nodes, globals, main_nodes, ctx)
+      Ok (nodes, globals, main_nodes, ctx, sv_source_types)
     in
 
     match result with
-    | Ok (nodes, globals, main_nodes, ctx) ->
+    | Ok (nodes, globals, main_nodes, ctx, sv_source_types) ->
       let nodes = List.map (fun ({ LustreNode.node_id = id1; } as n) ->
           if List.exists (fun id2 -> NI.equal id1 id2) main_nodes then
             { n with is_main = true }
@@ -444,7 +444,7 @@ let of_channel only_parse in_ch =
       in
       print_nodes_and_globals nodes globals;
       (* Return a subsystem tree from the list of nodes *)
-      Ok (Some (LN.subsystems_of_nodes main_nodes nodes, globals, declarations, ctx))
+      Ok (Some (LN.subsystems_of_nodes main_nodes nodes, globals, declarations, ctx, sv_source_types))
     | Error e -> Error e)
 
 

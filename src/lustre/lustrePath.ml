@@ -1913,11 +1913,16 @@ let pp_print_streams_json node model clock ppf = function
           (pp_print_stream_json node model clock) ",")
         streams
 
-let pp_print_streams_json is_top const_map const_funcs ppf
+let pp_print_streams_json is_top const_map const_funcs sv_types ppf
   ({N.inputs; N.outputs; N.locals} as node, model, call_conds) =
-
-  let is_visible = N.state_var_is_visible node in
-
+  
+  
+  let is_visible sv =  let open LustreNodeGen in
+  N.state_var_is_visible node sv && 
+    (match SVT.find_opt sv_types sv with
+    | Some Primitive | Some Set | Some MapBinding -> true
+    | Some MapPresence |None -> false)
+  in
   (* Boolean clock that indicates if the node is active for this particular
      call *)
   let clock = act_stream model call_conds in
@@ -2042,7 +2047,7 @@ let pp_print_streams_json_testgen ppf
     streams_with_values
 
 (* Output a list of node models. *)
-let rec pp_print_lustre_path_json' is_top const_map const_funcs ppf = function
+let rec pp_print_lustre_path_json' is_top const_map const_funcs (sv_types: LustreNodeGen.sv_source StateVar.StateVarHashtbl.t) (ppf: Format.formatter) = function
 
   | [] -> ()
 
@@ -2055,7 +2060,7 @@ let rec pp_print_lustre_path_json' is_top const_map const_funcs ppf = function
     (* Functions derived from constants are printed along with the global constants. 
        Type ascriptions not shown. *)
     if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription then 
-      pp_print_lustre_path_json' false const_map const_funcs ppf tl 
+      pp_print_lustre_path_json' false const_map const_funcs sv_types ppf tl 
     else
 
     let name = NI.get_user_name node_id |> HString.string_of_hstring in
@@ -2069,7 +2074,7 @@ let rec pp_print_lustre_path_json' is_top const_map const_funcs ppf = function
       | [] -> ()
       | subnodes ->
           Format.fprintf ppf ",@,\"subnodes\" :@,[@[<v 1>%a@]@,]"
-            (pp_print_lustre_path_json' false const_map const_funcs) subnodes
+            (pp_print_lustre_path_json' false const_map const_funcs sv_types) subnodes
     in
     
     let comma = if tl <> [] then "," else "" in
@@ -2095,43 +2100,43 @@ let rec pp_print_lustre_path_json' is_top const_map const_funcs ppf = function
        (pp_print_section_json "assumptionsTrace") contract_assumptions
        (pp_print_section_json "guaranteesTrace") contract_guarantees
        (pp_print_section_json "modesTrace") (interleave (required_modes,ensured_modes))
-       (pp_print_streams_json is_top const_map const_funcs) (node, model, call_conds)
+       (pp_print_streams_json is_top const_map const_funcs sv_types) (node, model, call_conds)
        pp_print_subnodes_json subnodes
        comma;
 
     (* Continue *)
-    pp_print_lustre_path_json' false const_map const_funcs ppf tl
+    pp_print_lustre_path_json' false const_map const_funcs sv_types ppf tl
 
   | _ :: tl ->
 
     (* Continue *)
-    pp_print_lustre_path_json' false const_map const_funcs ppf tl
+    pp_print_lustre_path_json' false const_map const_funcs sv_types ppf tl
 
 
 (* Output sequences of values for each stream of the node and for all
    its called nodes *)
-let pp_print_lustre_path_json ppf (path, const_map) =
+let pp_print_lustre_path_json ppf (sv_types: LustreNodeGen.sv_source StateVar.StateVarHashtbl.t) (path, const_map) =
   let const_funcs = get_const_func_info (snd path) in
   let const_funcs = process_const_funcs const_funcs path in
 
   (* Delegate to recursive function *)
   Format.fprintf ppf "@,[@[<v 1>%a@]@,]"
-    (pp_print_lustre_path_json' true const_map const_funcs) [path]
+    (pp_print_lustre_path_json' true const_map const_funcs sv_types) [path]
 
 
 (* Ouptut a hierarchical model as JSON *)
 let pp_print_path_json
-  trans_sys globals subsystems first_is_init ppf model
+  trans_sys (sv_types: LustreNodeGen.sv_source StateVar.StateVarHashtbl.t) globals subsystems first_is_init ppf model
 =
   (* Create the hierarchical model *)
   node_path_of_subsystems
     globals first_is_init trans_sys model subsystems
   (* Output as JSON *)
-  |> pp_print_lustre_path_json ppf
+  |> pp_print_lustre_path_json ppf sv_types
 
 
 
-let pp_print_lustre_path_json_testgen' const_map const_funcs ppf = function
+let pp_print_lustre_path_json_testgen' const_map const_funcs sv_types ppf = function
   | [] -> ()
   | (
     _, Node (node,
@@ -2147,30 +2152,30 @@ let pp_print_lustre_path_json_testgen' const_map const_funcs ppf = function
        ;
 
     (* Continue *)
-    pp_print_lustre_path_json' false const_map const_funcs ppf tl
+    pp_print_lustre_path_json' false const_map const_funcs sv_types ppf tl
 
   | _ :: tl ->
     (* Continue *)
-      pp_print_lustre_path_json' false const_map const_funcs ppf tl
+      pp_print_lustre_path_json' false const_map const_funcs sv_types ppf tl
 
 
-let pp_print_lustre_path_json_testgen ppf (path, const_map) =
+let pp_print_lustre_path_json_testgen ppf sv_types (path, const_map) =
   let const_funcs = get_const_func_info (snd path) in
   let const_funcs = process_const_funcs const_funcs path in
 
   (* Delegate to recursive function *)
   Format.fprintf ppf "[@[<v 1>%a@]]"
-    (pp_print_lustre_path_json_testgen' const_map const_funcs) [path]
+    (pp_print_lustre_path_json_testgen' const_map const_funcs sv_types) [path]
 
 let pp_print_path_json_testgen
-  trans_sys globals subsystems first_is_init ppf model
+  trans_sys sv_types globals subsystems first_is_init ppf model
 =
 
   (* Create the hierarchical model *)
   node_path_of_subsystems
     globals first_is_init trans_sys model subsystems
   (* Output as JSON *)
-  |> pp_print_lustre_path_json_testgen ppf
+  |> pp_print_lustre_path_json_testgen ppf sv_types
 
 (* ********************************************************************** *)
 (* CSV output                                                             *)
