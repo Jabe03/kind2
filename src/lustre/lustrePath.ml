@@ -1736,31 +1736,34 @@ let pp_print_stream_values_json clock ty ppf l =
       pp_print_list (fun ppf (i, v, _c) -> pp_print_stream_value_json ty ppf i v) "," ppf values_on_clock
 
 
-let rec pp_print_type_json ?state_var ?model field ppf stream_type =
+let rec pp_print_type_json ?sep ?state_var ?model type_src field ppf stream_type =
+  let sep = match sep with Some s -> s | None -> "," in
   match (Type.node_of_type stream_type) with
   | Type.Bool
   | Type.Int
   | Type.UBV _
   | Type.BV _
   | Type.Real -> (
-    Format.fprintf ppf "\"%s\" : \"%a\",@,"
+    Format.fprintf ppf "\"%s\" : \"%a\"%s@,"
         field (E.pp_print_lustre_type false) stream_type
+        sep
   )
   | Type.Abstr s -> (
     Format.fprintf ppf
         "\"%s\" : \"abstr\",@,\
          \"%sInfo\" :@,{@[<v 1>@,\
          \"name\" : %s\
-         @]@,},@,\
+         @]@,}%s@,\
         "
         field field s
+        sep
   )
   | Type.IntRange (i, j) -> (
     Format.fprintf ppf
         "\"%s\" : \"subrange\",@,\
          \"%sInfo\" :@,{@[<v 1>@,\
          %t\
-         @]@,},@,\
+         @]@,}%s@,\
         "
         field field
         (fun ppf ->
@@ -1776,6 +1779,7 @@ let rec pp_print_type_json ?state_var ?model field ppf stream_type =
               Numeral.pp_print_numeral j
           | None, None -> ()
         )
+        sep
   )
   | Type.Enum (_, _) -> (
     let pp_print_qstring ppf s =
@@ -1789,33 +1793,20 @@ let rec pp_print_type_json ?state_var ?model field ppf stream_type =
          \"%sInfo\" :@,{@[<v 1>@,\
          %t\
          \"values\" : [%a]\
-         @]@,},@,\
+         @]@,}%s@,\
         "
         field field
         pp_print_enum_name
         (pp_print_list pp_print_qstring ", ")
         (Type.constructors_of_enum stream_type)
+        sep
   )
   | Type.Array _ -> (
-    let base_type = Type.last_elem_type_of_array stream_type in
-      match state_var, model with
-      | Some sv, Some m when SVT.mem m sv ->
-        let key_type, value_type = Type.last_two_types_of_array stream_type in
-        let stream_values = SVT.find m sv in
-        (match stream_values with
-        | Model.Map map :: _ ->
-                Format.fprintf ppf
-              "\"type\" : \"Map\",@,\
-              \"typeInfo\" :@,{@[<v 1>@,\
-              %a\
-              %a\
-              @]@,},@,\
-              "
-              (pp_print_type_json "keyType") key_type
-              (pp_print_type_json "valueType") value_type
-        
-        | _ -> 
-          let sizes = Type.all_index_types_of_array stream_type |>
+    match type_src with
+    | LustreNodeGen.Primitive -> 
+      (
+      let base_type = Type.last_elem_type_of_array stream_type in  
+      let sizes = Type.all_index_types_of_array stream_type |>
           List.map Type.node_of_type |>
           List.map (function
             | Type.IntRange (_, Some j) ->
@@ -1829,28 +1820,33 @@ let rec pp_print_type_json ?state_var ?model field ppf stream_type =
             \"sizes\" : [%a]\
             @]@,},@,\
             "
-            (pp_print_type_json "baseType") base_type
+            (pp_print_type_json type_src "baseType") base_type
             (pp_print_list Format.pp_print_string ", ") sizes
             )
         
-      | _ ->
-        let sizes = Type.all_index_types_of_array stream_type |>
-        List.map Type.node_of_type |>
-        List.map (function
-          | Type.IntRange (_, Some j) ->
-            Numeral.string_of_numeral j
-          | _ -> assert false  )
-        in
-          Format.fprintf ppf
-        "\"type\" : \"array\",@,\
-         \"typeInfo\" :@,{@[<v 1>@,\
-         %a\
-         \"sizes\" : [%a]\
-         @]@,},@,\
-        "
-        (pp_print_type_json "baseType") base_type
-        (pp_print_list Format.pp_print_string ", ") sizes
-        )
+    | LustreNodeGen.Set -> 
+        let _, base_type = Type.last_two_types_of_array stream_type in
+            Format.fprintf ppf
+              "\"type\" : \"set\",@,\
+              \"typeInfo\" :@,{@[<v 1>@,\
+              %a\
+              @]@,},@,\
+              "
+              (pp_print_type_json ~sep:"" type_src "baseType") base_type
+    | LustreNodeGen.MapPresence ->  assert false
+    | LustreNodeGen.MapBinding ->
+        let key_type, value_type = Type.last_two_types_of_array stream_type in
+            Format.fprintf ppf
+              "\"type\" : \"map\",@,\
+              \"typeInfo\" :@,{@[<v 1>@,\
+              %a\
+              %a\
+              @]@,},@,\
+              "
+              (pp_print_type_json type_src "keyType") key_type
+              (pp_print_type_json type_src "valueType") value_type
+  )
+     
     
 
 let pp_print_section_json sect ppf mode_traces  =
@@ -1868,7 +1864,7 @@ let pp_print_section_json sect ppf mode_traces  =
                 \"instantValues\" :%t\
               @]@,}"
               name
-              (pp_print_type_json "type") stream_type
+              (pp_print_type_json LustreNodeGen.Primitive "type") stream_type
               (fun ppf ->
                 if values = [] then
                   Format.fprintf ppf " []"
@@ -1881,8 +1877,8 @@ let pp_print_section_json sect ppf mode_traces  =
       mode_traces
     
 (* Pretty-print a single stream *)
-let pp_print_stream_json node model clock ppf (index, state_var) =
-  
+let pp_print_stream_json node model clock sv_types ppf (index, state_var) =
+    let (type_src: LustreNodeGen.sv_source) = SVT.find sv_types state_var in
     let stream_values = try SVT.find model state_var with Not_found -> [] in
     let stream_type = StateVar.type_of_state_var state_var in
     Format.fprintf ppf
@@ -1894,7 +1890,7 @@ let pp_print_stream_json node model clock ppf (index, state_var) =
        @]@,}\
       "
       pp_print_stream_ident_json (index, state_var)
-      (pp_print_type_json ~state_var ~model "type") stream_type
+      (pp_print_type_json ~state_var ~model type_src "type") stream_type
       (pp_print_stream_prop_json node) state_var
       (function ppf ->
          if stream_values = [] then
@@ -1905,12 +1901,12 @@ let pp_print_stream_json node model clock ppf (index, state_var) =
            stream_values
       )
 
-let pp_print_streams_json node model clock ppf = function
+let pp_print_streams_json node model clock sv_types ppf = function
   | [] -> ()
   | streams ->
       Format.fprintf ppf ",@,\"streams\" :@,[@[<v 1>%a@]@,]"
         (pp_print_list
-          (pp_print_stream_json node model clock) ",")
+          (pp_print_stream_json node model clock sv_types) ",")
         streams
 
 let pp_print_streams_json is_top const_map const_funcs sv_types ppf
@@ -1987,7 +1983,7 @@ let pp_print_streams_json is_top const_map const_funcs sv_types ppf
   in
 
   Format.fprintf ppf "%a"
-    (pp_print_streams_json node model clock) streams
+    (pp_print_streams_json node model clock sv_types) streams
 
 
 let pp_print_var_json_testgen ppf ((name, var_type), value) = 
