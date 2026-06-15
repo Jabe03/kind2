@@ -835,6 +835,7 @@ let pp_print_stream_value_pt ty val_width ppf = function
   | None ->
     Format.fprintf ppf "%*s" val_width "_"
   | Some v ->
+    (* Format.printf "printing as type %a@." Type.pp_print_type ty ; *)
     let value_string = string_of_t (pp_print_value ~as_type:ty) v in
     let padding = val_width - (width_of_string value_string) in
     Format.fprintf ppf "%*s%a" padding "" (pp_print_value ~as_type:ty) v
@@ -960,7 +961,7 @@ let req_modes_to_stream_strings
 
 (* Convert identifiers and values of streams to strings and update
    maximal lenght of the strings *)
-let rec streams_to_values path ident_width val_width streams = 
+let rec streams_to_values path sv_types ident_width val_width  streams = 
 
   function
 
@@ -979,7 +980,13 @@ let rec streams_to_values path ident_width val_width streams =
         in
 
         let ty = StateVar.type_of_state_var state_var in
-        
+        let ty = match StateVar.StateVarHashtbl.find_opt sv_types state_var  with
+          | Some LustreNodeGen.MapPresence 
+          | Some LustreNodeGen.Set -> Type.idx_type_of_array ty
+          | Some _ 
+          | None -> ty
+        in
+        (* Format.printf "Type of stream %s is %a@." stream_name Type.pp_print_type ty; *)
         (* Get values of stream and convert to strings, keep track of
            maximum width of values *)
         let stream_values = SVT.find path state_var in
@@ -996,6 +1003,7 @@ let rec streams_to_values path ident_width val_width streams =
            remaining streams *)
         streams_to_values 
           path
+          sv_types
           ident_width
           val_width 
           ((stream_name, ty, stream_values) :: streams)
@@ -1013,6 +1021,7 @@ let rec streams_to_values path ident_width val_width streams =
         *)
         streams_to_values
           path
+          sv_types
           ident_width
           val_width
           streams
@@ -1106,7 +1115,7 @@ let rec get_widths_for_contract ident_width values_width contract_trace = match 
 
   (* Output sequences of values for each stream of the nodes in the list
    and for all its called nodes *)
-let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_funcs ppf = function
+let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_funcs sv_types ppf = function
 
 (* All nodes printed *)
 | [] -> ()
@@ -1122,10 +1131,15 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
   (* Functions derived from constants are printed along with the global constants. 
      Type ascriptions not shown. *)
   if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription then 
-    pp_print_lustre_path_pt' false const_map const_funcs ppf tl 
+    pp_print_lustre_path_pt' false const_map const_funcs sv_types ppf tl 
   else 
 
-  let is_visible = N.state_var_is_visible node in
+  let is_visible sv =  let open LustreNodeGen in
+  N.state_var_is_visible node sv && 
+    (match SVT.find_opt sv_types sv with
+    | Some Primitive | Some Set | Some MapBinding -> true
+    | Some MapPresence |None -> false)
+  in
 
   let node_name = NI.get_user_name node_id |> HString.string_of_hstring in
   let title =
@@ -1160,7 +1174,7 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     D.bindings inputs
     |> List.map pop_head_index
     |> List.filter (fun (_, sv) -> is_visible sv)
-    |> streams_to_values model ident_width val_width []
+    |> streams_to_values model sv_types ident_width val_width [] 
   in
 
   (* Remove index of position in output for printing *)
@@ -1168,7 +1182,7 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     D.bindings outputs
     |> List.map pop_head_index
     |> List.filter (fun (_, sv) -> is_visible sv)
-    |> streams_to_values model ident_width val_width []
+    |> streams_to_values model sv_types ident_width val_width []
   in
 
   let mode_ident = "Mode(s)" in
@@ -1206,11 +1220,11 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
   in
 
   let _ (* ident_witdth *), val_width, ghosts' =
-    ghosts |> streams_to_values model ident_width val_width []
+    ghosts |> streams_to_values model sv_types ident_width val_width []
   in
 
   let ident_width, val_width, locals' = 
-    locals |> streams_to_values model ident_width val_width []
+    locals |> streams_to_values model sv_types ident_width val_width []
   in
 
   let globals = if is_top then get_constants const_map [] else [] in
@@ -1219,11 +1233,11 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
   let constants = get_constants const_map scope in
 
   let ident_width, val_width, globals' =
-    globals |> streams_to_values model ident_width val_width []
+    globals |> streams_to_values model sv_types ident_width val_width []
   in
 
   let ident_width, val_width, constants' =
-    constants |> streams_to_values model ident_width val_width []
+    constants |> streams_to_values model sv_types ident_width val_width []
   in
 
   (* Sample inputs, outputs and locals on clock *)
@@ -1273,12 +1287,13 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     false
     const_map
     const_funcs
+    sv_types
     ppf
     (subnodes @ tl)
 
 | _ :: tl ->
   
-  pp_print_lustre_path_pt' false const_map const_funcs ppf tl
+  pp_print_lustre_path_pt' false const_map const_funcs sv_types ppf tl
 
 let get_const_func_info n = 
   let rec get_const_funcs (Node (top, path, _, _, _, _, _, subnodes)) = 
@@ -1309,24 +1324,24 @@ let get_const_func_info n =
 
 (* Output sequences of values for each stream of the node and for all
    its called nodes *)
-let pp_print_lustre_path_pt ?(full_contract = false) ppf (lustre_path, const_map) = 
+let pp_print_lustre_path_pt ?(full_contract = false) sv_types ppf (lustre_path, const_map) = 
   (* Collect information on functions derived from global constants *)
   let const_funcs = get_const_func_info (snd lustre_path) in
   let const_funcs = List.map (fun (id, ty, vals, _) -> id, ty, vals) const_funcs in
 
   (* Delegate to recursive function *)
-  pp_print_lustre_path_pt' ~full_contract true const_map const_funcs ppf [lustre_path]
+  pp_print_lustre_path_pt' ~full_contract true const_map const_funcs sv_types ppf [lustre_path]
 
 
 (* Output a hierarchical model as plain text *)
 let pp_print_path_pt
-  ?(full_contract = false) trans_sys globals subsystems first_is_init ppf model
+  ?(full_contract = false) trans_sys sv_types globals subsystems first_is_init ppf model
   =
   (* Create the hierarchical model *)
   node_path_of_subsystems
     globals first_is_init trans_sys model subsystems
   (* Output as plain text *)
-  |> pp_print_lustre_path_pt ~full_contract:full_contract ppf
+  |> pp_print_lustre_path_pt ~full_contract:full_contract sv_types ppf
 
 
 (* ********************************************************************** *)
@@ -1714,6 +1729,7 @@ let pp_print_stream_prop_json node ppf state_var =
 
 (* Pretty-print a single value of a stream at an instant *)
 let pp_print_stream_value_json ty ppf i v =
+  (* Format.printf "Printing as type %a@." Type.pp_print_type ty;  *)
   Format.fprintf ppf
     "@,[%d, %a]"
     i (Model.pp_print_value_json ~as_type:ty) v
@@ -1844,7 +1860,7 @@ let rec pp_print_type_json ?sep ?state_var ?model type_src field ppf stream_type
               @]@,},@,\
               "
               (pp_print_type_json type_src "keyType") key_type
-              (pp_print_type_json type_src "valueType") value_type
+              (pp_print_type_json ~sep:"" type_src "valueType") value_type
   )
      
     
@@ -1881,6 +1897,13 @@ let pp_print_stream_json node model clock sv_types ppf (index, state_var) =
     let (type_src: LustreNodeGen.sv_source) = SVT.find sv_types state_var in
     let stream_values = try SVT.find model state_var with Not_found -> [] in
     let stream_type = StateVar.type_of_state_var state_var in
+    let stream_type = match type_src with 
+      | LustreNodeGen.MapBinding -> stream_type
+      | LustreNodeGen.Primitive -> stream_type
+      | LustreNodeGen.Set -> Type.mk_array (Type.mk_int ()) (Type.idx_type_of_array stream_type)
+      | LustreNodeGen.MapPresence -> Type.mk_array (Type.mk_int ()) (Type.idx_type_of_array stream_type)
+
+    in
     Format.fprintf ppf
       "@,{@[<v 1>@,\
         \"name\" : \"%a\",@,\

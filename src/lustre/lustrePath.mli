@@ -30,7 +30,7 @@ val pp_print_path_xml :
     pre-processing reverted *)
 val pp_print_path_pt :
   ?full_contract:bool -> 
-  TransSys.t ->
+  TransSys.t -> LustreNodeGen.sv_source StateVar.StateVarHashtbl.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
   Format.formatter -> Model.path -> unit
 

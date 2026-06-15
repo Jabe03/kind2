@@ -531,12 +531,12 @@ let pp_print_path_pt
 (type s) ?(full_contract = false) (input_system : s t) trans_sys first_is_init ppf model =
   match input_system with 
 
-  | Lustre (main_subs, globals, _, _, _) ->
+  | Lustre (main_subs, globals, _, _, sv_source_types) ->
     let sub =
       let scope = TransSys.scope_of_trans_sys trans_sys in
       S.find_subsystem_of_list main_subs scope
     in
-    LustrePath.pp_print_path_pt ~full_contract:full_contract trans_sys globals sub first_is_init ppf model
+    LustrePath.pp_print_path_pt ~full_contract:full_contract trans_sys sv_source_types globals sub first_is_init  ppf model
 
   | Moxi _ ->
     Format.eprintf "pp_print_path_pt not implemented for MoXI input@.";

@@ -72,7 +72,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
 
   let vars_types = input_sys |> InputSystem.types_of_vars in
   (* List.iter (fun (id, ty) -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars; *)
-  HString.HStringMap.iter (fun id ty -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars_types;
+  (* HString.HStringMap.iter (fun id ty -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars_types; *)
   (* Read inputs from file *)
   let inputs =
     if input_file = "" then []
@@ -289,13 +289,149 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
                   Numeral.zero (Numeral.of_int steps)))
           Numeral.(pred (of_int steps))
       in
+      let translate_to_model_trace inps = 
+        
+        
+        let set_element_of_entry entry =
+          let rec find = function
+            | [] -> assert false
+            | (idx, InputParser.SetMapPresenceIndex) :: _ -> idx
+            | _ :: rest -> find rest
+          in
+          find (fst entry)
+        in
+        let map_element_of_entry entry =
+          let rec find = function
+            | [] -> assert false
+            | (idx, InputParser.SetMapBindingIndex) :: _ -> idx
+            | _ :: rest -> find rest
+          in
+          find (fst entry)
+        in
+        let term_to_index_term term =
+          if Term.type_of_term term == Type.t_bool then
+            if Term.equal term (Term.t_true) then 1 else 0
+          else
+            Numeral.to_int (Term.numeral_of_term term)
+        in
+        let entry_to_map (entry : (Term.t * InputParser.index_type) list * Model.value list) =
+          let key = List.mapi (fun i (idx, _) -> term_to_index_term idx) (fst entry) in
+          key, snd entry
+        in
+        let add_input_entry acc (((x,y), v): (InputParser.assignment_lhs * Term.t list)) =
+          let entry = (y, List.map (fun value -> Model.Term value) v) in
+          let old = try StateVar.StateVarMap.find x acc with Not_found -> [] in
+          StateVar.StateVarMap.add x (entry :: old) acc
+        in
+        
+        let entry_is_set entry =
+          List.exists (fun (_, idx_ty) -> idx_ty = InputParser.SetMapPresenceIndex) (fst entry)
+        in
+        let entry_is_map entry =
+          List.exists (fun (_, idx_ty) -> idx_ty = InputParser.SetMapBindingIndex) (fst entry)
+        in
+
+
+        (* Gather sequence of assignments at certain indicies for each state variable *)
+        let grouped = List.fold_left add_input_entry StateVar.StateVarMap.empty inps in
+
+        (* Accumulate each of those sequences into arrays, performing the transformation 
+          of sets and maps to their model form. This form is only for printing back
+          inputs, so the printers later on are not aware that the transformed sets
+          and maps are actually so and not plain arrays as they appear *)
+        StateVar.StateVarMap.fold (fun sv entries acc ->
+          let values =
+            match entries with
+            | [([], vals)] -> vals
+            | _ when List.for_all entry_is_set entries ->
+              (* Format.printf "Processing set entries for %a@." StateVar.pp_print_state_var sv; *)
+              let num_steps = List.length (snd (List.hd entries)) in
+                let step_terms = List.init num_steps (fun _ -> []) in
+                let step_terms =
+                  List.fold_left (fun terms_list entry ->
+                    let elt_term = set_element_of_entry entry in
+                    let vals = snd entry in
+                    List.map2 (fun terms v ->
+                      match v with
+                      | Model.Term term when Term.equal term (Term.t_true) -> elt_term :: terms
+                      | Model.Term _ -> terms
+                      | Model.Map _ | Model.Lambda _ -> assert false
+                    ) terms_list vals
+                  ) step_terms entries
+                in
+                (* Format.printf "Step terms for %a: %a@." StateVar.pp_print_state_var sv (Lib.pp_print_list (Lib.pp_print_list Term.pp_print_term ", ") "; ") step_terms; *)
+
+                List.map (fun terms ->
+                  let terms = List.rev terms in
+                  let _, map =
+                    List.fold_left (fun (i, map) term ->
+                      (i + 1, Model.MIL.add [i] term map)
+                    ) (0, Model.MIL.empty) terms
+                  in
+                  Model.Map map
+                ) step_terms
+            | _ when List.for_all entry_is_map entries ->
+              (* Format.printf "Processing map entries for %a@." StateVar.pp_print_state_var sv; *)
+              let num_steps = List.length (snd (List.hd entries)) in
+                let step_terms = List.init num_steps (fun _ -> []) in
+                let step_terms =
+                  List.fold_left (fun terms_list entry ->
+                    let elt_term = map_element_of_entry entry in
+                    let vals = snd entry in
+                    List.map2 (fun terms v ->
+                      match v with
+                      | Model.Term term when Term.equal term (Term.t_true) -> elt_term :: terms
+                      | Model.Term _ -> terms
+                      | Model.Map _ | Model.Lambda _ -> assert false
+                    ) terms_list vals
+                  ) step_terms entries
+                in
+                (* Format.printf "Step terms for %a: %a@." StateVar.pp_print_state_var sv (Lib.pp_print_list (Lib.pp_print_list Term.pp_print_term ", ") "; ") step_terms; *)
+                List.map (fun terms ->
+                  let terms = List.rev terms in
+                  let _, map =
+                    List.fold_left (fun (i, map) term ->
+                      (i + 1, Model.MIL.add [i] term map)
+                    ) (0, Model.MIL.empty) terms
+                  in
+                  Model.Map map
+                ) step_terms
+              | _ ->
+                let num_steps = List.length (snd (List.hd entries)) in
+                let step_maps = List.init num_steps (fun _ -> Model.MIL.empty) in
+                let step_maps = List.fold_left (fun maps entry ->
+                  let key, vals = entry_to_map entry in
+                  try
+                    List.map2 (fun map v ->
+                      match v with
+                      | Model.Term term -> Model.MIL.add key term map
+                      | Model.Map _ | Model.Lambda _ -> assert false
+                    ) maps vals
+                  with Invalid_argument _ ->
+                    failwith "Interpreter input values for the same state variable have inconsistent lengths"
+                ) step_maps entries in
+                List.map (fun m -> Model.Map m) step_maps
+          in
+          StateVar.StateVarMap.add sv values acc
+        ) grouped StateVar.StateVarMap.empty
+      in
+
+      let provided_input_model = translate_to_model_trace inputs in
+      let merged_paths = 
+        let mpath = StateVar.StateVarMap.of_list (Model.path_to_list path) in
+        StateVar.StateVarMap.union 
+        (fun sv prov mp -> Some prov) provided_input_model mpath
+        |> StateVar.StateVarMap.bindings
+      in
+        (* Format.printf "Statevars %a@." (Lib.pp_print_list (fun ppf (sv, vals) ->
+         Format.fprintf ppf "%a, %a;" StateVar.pp_print_state_var sv (Lib.pp_print_list Model.pp_print_value "@,") vals) ",@.") merged_paths; *)
 
       (* Output execution path *)
       KEvent.execution_path
         ~full_contract:contract_monitor
         input_sys
         trans_sys 
-        (Model.path_to_list path)
+        merged_paths
 
     )
 
