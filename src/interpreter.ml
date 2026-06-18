@@ -74,8 +74,8 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
   (* List.iter (fun (id, ty) -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars; *)
   (* HString.HStringMap.iter (fun id ty -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars_types; *)
   (* Read inputs from file *)
-  let inputs =
-    if input_file = "" then []
+  let (inputs, (inputs_str: string HString.HStringMap.t list)) =
+    if input_file = "" then ([], [])
     else
       try InputParser.read_file  ~only_inputs:(not contract_monitor) input_scope input_file vars_types
       with Sys_error e -> 
@@ -83,6 +83,10 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
         KEvent.log L_warn "@[<v>Error reading interpreter input file.@,%s@]" e;
         raise (Failure "main")
   in
+
+  Format.printf "DEBUG: Inputs read as strings: @.%a@." (Lib.pp_print_list (fun ppf map -> (
+    Format.fprintf ppf "[@.%a@.]" (Lib.pp_print_list (fun ppf (key, value) -> Format.fprintf ppf "%a     %s" HString.pp_print_hstring key value) "@.") (HString.HStringMap.bindings map)
+  )) "@.") inputs_str;
 
   let nb_inputs = List.filter StateVar.is_input trans_svars |> List.length in
 

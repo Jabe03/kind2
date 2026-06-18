@@ -425,7 +425,148 @@ let read_val ?(only_inputs = true) scope name indexes (arr_indexes : (Term.t*ind
 let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
   to_assoc json |> List.map (fun (name, json) -> read_val ~only_inputs:only_inputs scope name [] [] json sv_name_type_map)
 
-(* Parse a JSON input file *)
+
+
+
+  let rec get_string_reps_sets_maps' ?(only_inputs = true) scope name indexes (arr_indexes : (Term.t * index_type) list) (json: Yojson.Safe.t)  expected_type  : string =
+  (* Format.printf "Parsing %a with expected type %a@." (Yojson.Safe.pretty_print ~std:true) json LustreAst.pp_print_lustre_type expected_type ; *)
+  match json, expected_type with
+  | `Assoc lst, LustreAst.RecordType (_,_,types)->
+     let vals = lst |>
+      List.map (
+        fun (str, json) ->
+        let lookup_ident id = 
+          let rec lookup_ident' id rest = match rest with 
+          |[] -> failwith "Identifier not found" 
+          | (_, tid, ty) :: _ when id = tid -> ty 
+          | _ :: rest -> lookup_ident' id rest
+        in
+        lookup_ident' id types
+        in
+        Format.asprintf "\"%s\" : \"%s\"" str (get_string_reps_sets_maps' scope name indexes arr_indexes json (lookup_ident (HString.mk_hstring str)))
+      ) in
+      Format.asprintf "{%a}" (Lib.pp_print_list Format.pp_print_string ", ") vals
+  | `List lst, LustreAst.ArrayType (_, (ty,expr)) ->
+    (* Can represent an array *)
+      (match expr with
+      |Const (_,(Num v)) -> 
+        if HString.equal ((List.length lst) |> Int.to_string |> HString.mk_hstring) v |> not then raise (Not_an_input ("Array " ^ name ^ " has incorrect length"))
+      | _ -> ());
+      let vals = lst |>
+        List.mapi (
+        fun i json ->
+        let new_index = LustreIndex.ArrayVarIndex (LustreExpr.mk_int_expr Numeral.one) in
+        let arr_index = (Term.mk_num (Numeral.of_int i)) in
+        get_string_reps_sets_maps' scope name (new_index::indexes) ((arr_index, ArrayIndex)::arr_indexes) json ty
+        )
+      in
+      Format.asprintf "[%a]" (Lib.pp_print_list Format.pp_print_string ", ") vals
+  | `List lst, LustreAst.TupleType (_, types) ->
+    (* Can represent a tuple *)
+      let vals = (try (List.combine types lst) |> List.mapi (
+            fun i (ty, json) ->
+            get_string_reps_sets_maps' scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
+          ) 
+      with Invalid_argument _ -> raise (Not_an_input ("Tuple " ^ name ^ " has incorrect length"))) in
+      Format.asprintf "(%a)" (Lib.pp_print_list Format.pp_print_string ", ") vals
+  | `List lst, LustreAst.Map (_, key_type, value_type) ->
+    (* Can represent a map *)
+      let (keys, values) = 
+        List.fold_left 
+        (fun (keys, values) y -> 
+          match y with 
+          | `List [key;value] -> 
+            let new_key =  (get_string_reps_sets_maps' scope name [] [] key key_type ) in
+            let new_value = get_string_reps_sets_maps' scope name (indexes) (arr_indexes) value value_type in
+            ((new_key :: keys , new_value :: values))
+          | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
+
+        ) ([], []) lst  in
+      
+
+      
+      
+      Format.asprintf "[%t]" (fun ppf -> (Lib.pp_print_list2i (fun ppf i k v -> Format.fprintf ppf "%s := %s" k v) "; " ppf keys values))
+  | `List lst, LustreAst.Set (_, ty) ->
+    (* Can represent a set *)
+    let elements = 
+      List.fold_left 
+      (fun (elements) y -> 
+          let element =  (get_string_reps_sets_maps' scope name indexes arr_indexes y ty ) in
+          (element :: elements)
+      ) ([]) lst  in
+      Format.asprintf "{%a}" (Lib.pp_print_list Format.pp_print_string ", ") elements
+  | (`Bool _  as json),  (Bool _ as lus_typ)
+  | (`String _ as json), (Int _ as lus_typ)
+  | (`String _ as json), (Real _ as lus_typ)
+  | (`String _ as json), (EnumType _ as lus_typ)
+  | (`Float _ as json),  (Real _ as lus_typ)
+  | (`Int _ as json),    (Int _ as lus_typ)
+  | (`Intlit _ as json), (Int _ as lus_typ)
+  | json,                (LustreAst.RefinementType (_,_,_) as lus_typ) -> (
+    let indexes = List.rev indexes in
+    let arr_indexes = List.rev arr_indexes in
+    let full_scope = scope @ (LustreIndex.mk_scope_for_index indexes) in
+    let indexes = List.filter
+        (function 
+          | LustreIndex.ArrayVarIndex _ 
+          | LustreIndex.ArrayIntIndex _ 
+          | LustreIndex.SetMapIndex _ -> false
+          | LustreIndex.RecordIndex _
+          | LustreIndex.TupleIndex _
+          | LustreIndex.ListIndex _
+          | LustreIndex.AbstractTypeIndex _ -> true) indexes in
+    let full_name =
+      Format.asprintf "%s%a" name (LustreIndex.pp_print_index true) indexes
+    in
+
+    let svar_info : sv_info = (full_name, full_scope, only_inputs) in
+    let name_indexes = (svar_info, arr_indexes) in
+    (* Extract the type of an element of an array (and check the ranges) *)
+    try (
+      match lus_typ, json with
+
+      | EnumType _, `String str ->
+        str
+      | Bool _ , `Bool b -> if b then "true" else "false"
+      | Real _, `Float f -> string_of_float f
+      | Real _, `Int i -> string_of_int i 
+      | Real _, `String str -> str
+      | Real _, `Intlit str -> str
+      | _, `Int i -> string_of_int i
+
+      | _, `Intlit str 
+      | _, `String str  ->
+        str
+
+      | _ -> raise (Type_mismatch ("Reading leaf " ^ full_name))
+      )
+    with | Invalid_argument _ -> raise (Type_mismatch (Format.asprintf "Invalid arg %a" pp_print_lus_type_mismatch (full_name, lus_typ, json)))
+         | Not_found ->          raise (Type_mismatch (Format.asprintf "not found %a"   pp_print_lus_type_mismatch (full_name, lus_typ, json))))
+    (* Error match cases *)
+  | json, lus_typ ->
+    (* The JSON value is not of the expected type *)
+    raise (Type_mismatch (Format.asprintf "%a" pp_print_lus_type_mismatch (name, lus_typ, json)))
+
+  
+
+  let get_str_values_of_vars ?(only_inputs=true) top_scope_index sv_name_type_map json = 
+    json
+    |> to_assoc
+    |> List.fold_left
+        (fun acc (name, json) ->
+            let expected_type : lustre_type =
+              sv_name_type_map
+              |> HString.HStringMap.find (HString.mk_hstring name)
+            in
+            let value =
+              get_string_reps_sets_maps' ~only_inputs top_scope_index name [] [] json expected_type
+            in
+            HString.HStringMap.add ( HString.mk_hstring name) value acc)
+        HString.HStringMap.empty
+
+
+    (* Parse a JSON input file *)
 let read_json_file ?(only_inputs=true) top_scope_index filename sv_name_type_map =
   let json =
     try Yojson.Safe.from_file filename with
@@ -435,9 +576,12 @@ let read_json_file ?(only_inputs=true) top_scope_index filename sv_name_type_map
              "Error reading %s: the file is not valid JSON.\n\n%s"
              filename msg)
   in
-  json |> to_list
-  |> List.map (read_vars ~only_inputs:only_inputs top_scope_index sv_name_type_map) |> List.flatten |> group_by_var
-
+  let json_list = json |> to_list in
+  (* Format.printf "%a" (Lib.pp_print_list Yojson.Safe.pretty_print "@.@.@.") json_list; *)
+  (
+  json_list |> List.map (read_vars ~only_inputs:only_inputs top_scope_index sv_name_type_map) |> List.flatten |> group_by_var,
+  json_list
+  |> List.map (get_str_values_of_vars ~only_inputs:only_inputs top_scope_index sv_name_type_map))
 
 (* ====================== GENERAL ======================== *)
 
@@ -447,8 +591,8 @@ let read_file ?(only_inputs=true) top_scope_index filename sv_name_type_map =
   then
     read_json_file ~only_inputs:only_inputs top_scope_index filename sv_name_type_map
   else
-    read_csv_file top_scope_index filename
-    |> List.map (fun (sv,vs) -> ((sv,[]),vs))
+    (read_csv_file top_scope_index filename
+    |> List.map (fun (sv,vs) -> ((sv,[]),vs)), [])
 
 (* 
    Local Variables:
