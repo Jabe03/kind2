@@ -195,7 +195,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
   (* Assert transition relation up to number of steps *)
   assert_trans solver trans_sys (Numeral.of_int steps);
   let module IntMap = Map.Make(Int) in
-  let defined_indexes : (((Term.t list) StateVar.StateVarMap.t) IntMap.t )ref = ref IntMap.empty in
+  let defined_indexes : (((Term.t list list) StateVar.StateVarMap.t) IntMap.t )ref = ref IntMap.empty in
   let add_defined_index instant state_var indexes = 
       let instant_map = try IntMap.find instant !defined_indexes with Not_found -> StateVar.StateVarMap.empty in
       let old_idxs = try StateVar.StateVarMap.find state_var instant_map with Not_found -> [] in
@@ -224,17 +224,25 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
 
               (* Select index of instance variable *)
               (* Constrain variable to its value at instant *)
+              let idxs_seen = ref [] in
               let var = List.fold_left (
                 fun acc (i, idx_ty) ->
-                  if idx_ty = InputParser.SetMapPresenceIndex then add_defined_index instant state_var i;
+                   if idx_ty = InputParser.SetMapPresenceIndex then idxs_seen := i :: !idxs_seen; 
                 Term.mk_select acc (i)
+                (* Records tuern into multidimensional array, where each index is a field
+                    { x: int; y: real} -->
+                      [
+                      (x_index): [1,2,3,4](map/set values),
+                      (y_index): [2.2, 3.4.5.5]
+                      ]
+                *)
               ) var indexes |> Term.convert_select in
-
+              if !idxs_seen != [] then add_defined_index instant state_var !idxs_seen;
               (* Constrain variable to its value at instant *)
               let equation = 
                 Term.mk_eq [var; instant_value] 
               in
-
+              
               (* Assert equation *)
               SMTSolver.assert_term solver equation
             )
@@ -244,38 +252,48 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
     inputs;
 
   (* Assert set and map presence *)
-  IntMap.iter (fun instant state_var_map ->
-    StateVar.StateVarMap.iter (fun state_var indexes -> (
+  IntMap.iter (fun instant (state_var_map: Term.t list list StateVar.StateVarMap.t) ->
+    StateVar.StateVarMap.iter (fun state_var (indexes : Term.t list list) -> (
       (* Format.printf  "Making forall for: %a: %a@." StateVar.pp_print_state_var state_var
           (Lib.pp_print_list (
             fun ppf i -> Format.fprintf ppf "%a" Term.pp_print_term i
           ) ", ") indexes ; *)
-      let idx_var = Var.mk_fresh_var (Type.mk_int ()) in
-      let mk_forall tm = Term.mk_forall [idx_var] tm in
+      let idx_vars = match indexes with 
+        | idx :: _ -> List.map (fun _ -> Var.mk_fresh_var (Type.mk_int ())) idx 
+        | _ -> assert false 
+      in
+      let mk_forall tm = Term.mk_forall idx_vars tm in
       
       let var = Var.mk_state_var_instance 
                   state_var 
                   (Numeral.of_int instant)
                 |> Term.mk_var
       in
-              
-        let var = Term.mk_select var (Term.mk_var idx_var) |> Term.convert_select in
+      let var = List.fold_left (
+        fun acc idx_var ->
+        Term.mk_select acc (Term.mk_var idx_var)
+      ) var idx_vars |> Term.convert_select in
                 
         (* Format.printf "Var created: %a@." Term.pp_print_term var; *)
         let equation = 
           Term.mk_eq [var; Term.mk_false ()] 
         in
-        let body = Term.mk_or (equation :: (List.map (fun idx -> Term.mk_eq [idx ; (Term.mk_var idx_var)]) indexes )) in
-        let equation = mk_forall body in
-        (* Format.printf "Asserting equation for %a: %a. var was %a@."
-                  StateVar.pp_print_state_var state_var
-                  Term.pp_print_term equation
-                  Term.pp_print_term var; *)
-        SMTSolver.assert_term solver equation
-    )) state_var_map )!defined_indexes;
-  KEvent.log L_info 
-    "Parsing interpreter input file %s"
-    (Flags.input_file ()); 
+        let mk_index_equalities idx_vars indexes = 
+          (* Format.printf "Making index inequalities for [%a] and [%a]" (Lib.pp_print_list Var.pp_print_var ", ") idx_vars (Lib.pp_print_list Term.pp_print_term ", ") indexes; *)
+          List.map2 (fun idx_var index -> Term.mk_eq [(Term.mk_var idx_var); index]) idx_vars indexes in
+        let ands =  (List.map (fun indexes -> Term.mk_and (mk_index_equalities idx_vars (List.rev indexes))) indexes) in
+        (* Format.printf "ANDS: %a@." (Lib.pp_print_list Term.pp_print_term ",") ands; *)
+        let body = Term.mk_or (equation :: 
+        ands ) in
+            let equation = mk_forall body in
+            (* Format.printf "Asserting equation for %a: %a.@."
+                      StateVar.pp_print_state_var state_var
+                      Term.pp_print_term equation; *)
+            SMTSolver.assert_term solver equation
+        )) state_var_map ) !defined_indexes;
+        KEvent.log L_info 
+          "Parsing interpreter input file %s"
+          (Flags.input_file ()); 
 
   (* Run the system *)
   if (SMTSolver.check_sat solver) then

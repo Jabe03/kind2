@@ -205,20 +205,22 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
   match json, expected_type with
   | `Assoc lst, LustreAst.RecordType (_,_,types)->
     let seen = ref [] in
-     lst |>
+     types |>
       List.map (
-        fun (str, json) ->
-        if List.exists (fun s -> s = str) !seen then raise (Not_an_input ("Duplicate field in record " ^ name)) ;
-          seen := str :: !seen ;
+        fun (_, tid, ty) ->
+        
         let lookup_ident id = 
           let rec lookup_ident' id rest = match rest with 
-          |[] -> failwith "Identifier not found" 
-          | (_, tid, ty) :: _ when id = tid -> ty 
-          | _ :: rest -> lookup_ident' id rest
+            |[] -> failwith ("No definition provided for " ^ HString.string_of_hstring id ^ " in record " ^ name) 
+            | (str, value) :: _ when HString.equal (HString.mk_hstring str) id -> (str, value) 
+            | _ :: rest -> lookup_ident' id rest
+          in
+          lookup_ident' tid lst
         in
-        lookup_ident' id types
-        in
-        read_term scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes json (lookup_ident (HString.mk_hstring str))
+        let str, value = lookup_ident tid in
+        if List.exists (fun s -> s = str) !seen then raise (Not_an_input ("Duplicate field "^ str ^ " in record " ^ name)) ;
+          seen := str :: !seen ;
+        read_term scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes value ty
       )
       |> List.flatten
   | `List lst, LustreAst.ArrayType (_, (ty,expr)) ->
@@ -245,36 +247,49 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
       with Invalid_argument _ -> raise (Not_an_input ("Tuple " ^ name ^ " has incorrect length")))
   | `List lst, LustreAst.Map (_, key_type, value_type) ->
     (* Can represent a map *)
+    (* 
+      type sv_info = (
+        (string) *
+        (string list) *
+        (bool)
+      ) 
+    *)
       let ((new_arr_indexes, presence_elements, binding_elements)) = 
         List.fold_left 
         (fun (presence_i, presence_elements, binding_elements) y -> 
           match y with 
           | `List [key;value] -> 
-            let term = match (read_term scope name [] [] key key_type ) with
-              | [(_, term)] -> term
-              | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
-            in
-            if List.exists (fun t -> Term.equal t term) presence_i then raise (Not_an_input ("Multiple occurrences of key in map " ^ name)) ;
+            let terms = match (read_term scope name [] [] key key_type ), key_type with
+              | [(_, term)], _ -> [term]
+              | terms, LustreAst.TupleType _ ->
+                List.fold_left (fun acc (_, term) -> term::acc) [] terms  
+              
+              | terms, LustreAst.RecordType _ -> 
+                List.fold_left (fun acc (_, term) -> term::acc) [] terms  |> List.rev
 
-            ((term ::presence_i, (`Bool true)::presence_elements, value::binding_elements))
+              | _ -> raise (Not_an_input ("Maps with key type " ^ (Format.asprintf "%a" LustreAst.pp_print_lustre_type key_type) ^ " not implemented:" ^ name))
+            in
+            if List.exists (fun t -> List.equal (fun t term -> Term.equal t term) t terms) presence_i then raise (Not_an_input ("Multiple occurrences of key in map " ^ name)) ;
+
+            ((terms ::presence_i, (`Bool true)::presence_elements, value::binding_elements))
           | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
 
         ) ([], [],[]) lst  in
-      let bindings_indexes = List.map (fun i -> (i, SetMapBindingIndex)) new_arr_indexes in
+      let bindings_indexes = List.map (fun i -> List.map (fun i -> (i, SetMapBindingIndex)) i) new_arr_indexes in
       let bindings = 
           (List.map2 (
           fun index json ->
           let new_index = LustreIndex.TupleIndex 1 in
-          read_term scope name (new_index::indexes) (index::arr_indexes) json value_type
+          read_term scope name (new_index::indexes) (List.append index arr_indexes) json value_type
         ) bindings_indexes binding_elements) |> List.flatten in
       
-      let presence_indexes = List.map (fun i -> (i, SetMapPresenceIndex)) new_arr_indexes in
+      let presence_indicies = List.map (fun i -> List.map (fun i -> (i, SetMapBindingIndex)) i) new_arr_indexes in
       let presences = 
             (List.map2 (
             fun index json ->
             let new_index = LustreIndex.TupleIndex 0 in
-            read_term scope name (new_index::indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
-          ) presence_indexes presence_elements) |> List.flatten in
+            read_term scope name (new_index::indexes) (List.append index arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
+          ) presence_indicies presence_elements) |> List.flatten in
       
       presences @ bindings
   | `List lst, LustreAst.Set (_, ty) ->
@@ -282,18 +297,29 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
     let ((new_arr_indexes, presence_elements)) = 
       List.fold_left 
       (fun (presence_i, presence_elements) y -> 
-          let term = match (read_term scope name indexes arr_indexes y ty ) with
-            | [(_, term)] -> term
+          let terms = match (read_term scope name indexes arr_indexes y ty ), ty with
+            | [(_, term)], _ -> [term]
+            | terms, LustreAst.TupleType _ ->
+              List.fold_left (fun acc (_, term) -> term::acc) [] terms  
+            
+            | terms, LustreAst.RecordType _ -> 
+              List.fold_left (fun acc (_, term) -> term::acc) [] terms  |> List.rev
+
+
             | _ -> raise (Not_an_input ("Container types as keys is not yet implemented " ^ name))
           in
-          if List.exists (fun (t, _) -> Term.equal t term) presence_i then raise (Not_an_input ("Duplicate element in set " ^ name)) ;
-          (((term, SetMapPresenceIndex) ::presence_i, (`Bool true)::presence_elements))
+          
+            if List.exists (fun t -> List.equal (fun t term -> Term.equal t term) t terms) presence_i then raise (Not_an_input ("Multiple occurrences of key in map " ^ name)) ;
+          ((terms ::presence_i, (`Bool true)::presence_elements))
       ) ([], []) lst  in
-    let presences = 
+      let presence_indicies = List.map (fun i -> List.map (fun i -> (i, SetMapPresenceIndex)) i) new_arr_indexes in
+
+      let presences = 
           (List.map2 (
           fun index json ->
-          read_term scope name (indexes) (index::arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
-        ) new_arr_indexes presence_elements) |> List.flatten in
+            (* Format.printf "Reading term with indexes %a@." (Lib.pp_print_list (fun fmt (term, _) -> Format.fprintf fmt "%a" Term.pp_print_term term) ", ") index; *)
+          read_term scope name (indexes) (List.append index arr_indexes) json (LustreAst.Bool Lib.dummy_pos)
+        ) presence_indicies presence_elements) |> List.flatten in
       (* Format.printf "Presences: %a@." (Lib.pp_print_list (fun fmt ((sv, tlist), t) -> Format.fprintf fmt "SV:%a  Indexes: %a Term: %a" StateVar.pp_print_state_var sv (Lib.pp_print_list Term.pp_print_term ",") tlist  Term.pp_print_term t) ",@.") presences; *)
     presences
   | (`Bool _  as json),  (Bool _ as lus_typ)
