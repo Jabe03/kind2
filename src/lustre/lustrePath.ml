@@ -867,9 +867,8 @@ let pp_print_stream_ident_pt ppf (index, state_var) =
 
   Format.fprintf
     ppf
-    "%a%a"
+    "%a"
     pp_print_lustre_var state_var
-    (D.pp_print_index false) index
 
 
 (* Output the calling node and the position of the call *)
