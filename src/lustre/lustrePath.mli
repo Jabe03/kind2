@@ -30,18 +30,18 @@ val pp_print_path_xml :
     pre-processing reverted *)
 val pp_print_path_pt :
   ?full_contract:bool -> 
-  TransSys.t -> LustreNodeGen.sv_source StateVar.StateVarHashtbl.t ->
+  TransSys.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
   Format.formatter -> Model.path -> unit
 
 (** Output a counterexample as a Lustre execution in JSON format *)
 val pp_print_path_json :
-  TransSys.t -> LustreNodeGen.sv_source StateVar.StateVarHashtbl.t ->
+  TransSys.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
   Format.formatter -> Model.path -> unit
 
 val pp_print_path_json_testgen :
-  TransSys.t -> LustreNodeGen.sv_source StateVar.StateVarHashtbl.t ->
+  TransSys.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
   Format.formatter -> Model.path -> unit
 

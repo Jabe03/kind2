@@ -206,18 +206,13 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
   | `Assoc lst, LustreAst.RecordType (_,_,types)->
     let seen = ref [] in
      types |>
-      List.map (
-        fun (_, tid, ty) ->
-        
-        let lookup_ident id = 
-          let rec lookup_ident' id rest = match rest with 
-            |[] -> failwith ("No definition provided for " ^ HString.string_of_hstring id ^ " in record " ^ name) 
-            | (str, value) :: _ when HString.equal (HString.mk_hstring str) id -> (str, value) 
-            | _ :: rest -> lookup_ident' id rest
-          in
-          lookup_ident' tid lst
+      List.map ( fun (_, tid, ty) ->
+        let rec lookup_ident id rest = match rest with 
+          |[] -> failwith ("No definition provided for " ^ HString.string_of_hstring id ^ " in record " ^ name) 
+          | (str, value) :: _ when HString.equal (HString.mk_hstring str) id -> (str, value) 
+          | _ :: rest -> lookup_ident id rest
         in
-        let str, value = lookup_ident tid in
+        let str, value = lookup_ident tid lst in
         if List.exists (fun s -> s = str) !seen then raise (Not_an_input ("Duplicate field "^ str ^ " in record " ^ name)) ;
           seen := str :: !seen ;
         read_term scope name ((LustreIndex.RecordIndex str)::indexes) arr_indexes value ty
@@ -456,7 +451,7 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
 
 
 
-  let rec get_string_reps_sets_maps' ?(only_inputs = true) scope name indexes (arr_indexes : (Term.t * index_type) list) (json: Yojson.Safe.t)  expected_type  : string =
+  let rec get_string_reps_sets_maps' scope name indexes (arr_indexes : (Term.t * index_type) list) (json: Yojson.Safe.t)  expected_type  : string =
   (* Format.printf "Parsing %a with expected type %a@." (Yojson.Safe.pretty_print ~std:true) json LustreAst.pp_print_lustre_type expected_type ; *)
   match json, expected_type with
   | `Assoc lst, LustreAst.RecordType (_,_,types)->
@@ -514,7 +509,7 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
 
       
       
-      Format.asprintf "[%t]" (fun ppf -> (Lib.pp_print_list2i (fun ppf i k v -> Format.fprintf ppf "%s := %s" k v) "; " ppf keys values))
+      Format.asprintf "[%t]" (fun ppf -> (Lib.pp_print_list2i (fun ppf _ k v -> Format.fprintf ppf "%s := %s" k v) "; " ppf keys values))
   | `List lst, LustreAst.Set (_, ty) ->
     (* Can represent a set *)
     let elements = 
@@ -533,23 +528,10 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
   | (`Intlit _ as json), (Int _ as lus_typ)
   | json,                (LustreAst.RefinementType (_,_,_) as lus_typ) -> (
     let indexes = List.rev indexes in
-    let arr_indexes = List.rev arr_indexes in
-    let full_scope = scope @ (LustreIndex.mk_scope_for_index indexes) in
-    let indexes = List.filter
-        (function 
-          | LustreIndex.ArrayVarIndex _ 
-          | LustreIndex.ArrayIntIndex _ 
-          | LustreIndex.SetMapIndex _ -> false
-          | LustreIndex.RecordIndex _
-          | LustreIndex.TupleIndex _
-          | LustreIndex.ListIndex _
-          | LustreIndex.AbstractTypeIndex _ -> true) indexes in
     let full_name =
       Format.asprintf "%s%a" name (LustreIndex.pp_print_index true) indexes
     in
 
-    let svar_info : sv_info = (full_name, full_scope, only_inputs) in
-    let name_indexes = (svar_info, arr_indexes) in
     (* Extract the type of an element of an array (and check the ranges) *)
     try (
       match lus_typ, json with
@@ -578,7 +560,7 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
 
   
 
-  let get_str_values_of_vars ?(only_inputs=true) top_scope_index sv_name_type_map json = 
+  let get_str_values_of_vars top_scope_index sv_name_type_map json = 
     json
     |> to_assoc
     |> List.fold_left
@@ -588,7 +570,7 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
               |> HString.HStringMap.find (HString.mk_hstring name)
             in
             let value =
-              get_string_reps_sets_maps' ~only_inputs top_scope_index name [] [] json expected_type
+              get_string_reps_sets_maps' top_scope_index name [] [] json expected_type
             in
             HString.HStringMap.add ( HString.mk_hstring name) value acc)
         HString.HStringMap.empty
@@ -609,7 +591,7 @@ let read_json_file ?(only_inputs=true) top_scope_index filename sv_name_type_map
   (
   json_list |> List.map (read_vars ~only_inputs:only_inputs top_scope_index sv_name_type_map) |> List.flatten |> group_by_var,
   json_list
-  |> List.map (get_str_values_of_vars ~only_inputs:only_inputs top_scope_index sv_name_type_map))
+  |> List.map (get_str_values_of_vars top_scope_index sv_name_type_map))
 
 (* ====================== GENERAL ======================== *)
 
