@@ -1516,7 +1516,7 @@ let state_var_is_visible node =
       locals
     |> List.filter (fun (idx, _) ->
       List.exists (function
-        | D.SetMapIndex _ -> false
+        | D.SetMapIndex _ -> true
         | _ -> false
         ) idx
     )

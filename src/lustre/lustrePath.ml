@@ -1144,12 +1144,8 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     pp_print_lustre_path_pt' false const_map const_funcs sv_types ppf tl 
   else 
 
-  let is_visible sv =  let open LustreNodeGen in
-  N.state_var_is_visible node sv && 
-    (match SVT.find_opt sv_types sv with
-    | Some Primitive | Some Set | Some MapBinding -> true
-    | Some MapPresence |None -> false)
-  in
+  let is_visible = N.state_var_is_visible node in
+
 
   let node_name = NI.get_user_name node_id |> HString.string_of_hstring in
   let title =
@@ -1947,12 +1943,8 @@ let pp_print_streams_json is_top const_map const_funcs sv_types ppf
   ({N.inputs; N.outputs; N.locals} as node, model, call_conds) =
   
   
-  let is_visible sv =  let open LustreNodeGen in
-  N.state_var_is_visible node sv && 
-    (match SVT.find_opt sv_types sv with
-    | Some Primitive | Some Set | Some MapBinding -> true
-    | Some MapPresence |None -> false)
-  in
+  let is_visible = N.state_var_is_visible node in
+
   (* Boolean clock that indicates if the node is active for this particular
      call *)
   let clock = act_stream model call_conds in
