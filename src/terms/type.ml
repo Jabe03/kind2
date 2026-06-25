@@ -556,13 +556,6 @@ let rec last_elem_type_of_array = function
   | { Hashcons.node = Array (e,_) } -> e
   | _ -> assert false
 
-(* Return the last element and index types of a nested array type *)
-let rec last_two_types_of_array = function
-  | { Hashcons.node = Array (e, _) } when is_array e -> last_two_types_of_array e
-  | { Hashcons.node = Array (e, i) } -> (e, i)
-  | _ -> assert false
-
-
 
 let constructors_of_enum = function
   | { Hashcons.node = Enum (l, _) } ->
