@@ -68,8 +68,6 @@ type identifier_maps = {
   call_count : int;
 }
 
-type sv_source = Primitive | Set | MapPresence | MapBinding
-
 type compiler_state = {
   nodes : LustreNode.t list;
   node_io : (StateVar.t X.t * StateVar.t X.t * identifier_maps) NI.Map.t;
@@ -79,7 +77,6 @@ type compiler_state = {
   other_constants : LustreAst.expr StringMap.t;
   state_var_bounds : (LustreExpr.expr LustreExpr.bound_or_fixed list)
     StateVar.StateVarHashtbl.t;
-  state_var_source_types : sv_source StateVar.StateVarHashtbl.t;
   global_constraints: LustreExpr.t list;
   adt_map : LDAT.adt_map;
 }
@@ -145,7 +142,6 @@ let empty_compiler_state () = {
   local_constants = StringMap.empty;
   other_constants = StringMap.empty;
   state_var_bounds = SVT.create 7;
-  state_var_source_types = SVT.create 7;
   global_constraints = [];
   adt_map = StringMap.empty;
 }
@@ -231,7 +227,6 @@ let mk_state_var
     ?expr_ident
     ?(force_return = false)
     map
-    cstate
     scope
     sv_ident 
     index 
@@ -283,34 +278,9 @@ let mk_state_var
     state_var, true)
   in
   (* Classify the state variable source for Lustre map/set tracking. *)
-  let state_var_source_type =
-    let is_setmap = List.exists (fun idx ->
-      match idx with
-      | X.SetMapIndex _ -> true
-      | _ -> false)
-      index
-    in
-    if not is_setmap then Primitive else
-    let rec first_tuple_index = function
-      | [] -> None
-      | X.TupleIndex i :: _ -> Some i
-      | _ :: rest -> first_tuple_index rest
-    in
-    let last_tuple_index = List.fold_left (fun acc idx ->
-      match idx with
-      | X.TupleIndex i -> Some i
-      | _ -> acc) None (List.take (List.length index - 1) index)
-    in
-    (* Format.printf "List of indicies for sv %a: %a@." StateVar.pp_print_state_var state_var (Lib.pp_print_list (fun fmt v -> X.pp_print_one_index true fmt v) ",") (List.take (List.length index - 1) index); *)
-    match last_tuple_index with
-    | Some 0 -> MapPresence
-    | Some 1 -> MapBinding
-    | _ -> Set
-  in
   SVT.replace !map.bounds state_var (bounds_of_index index);
   H.replace !map.expr expr_ident (compute_expr (E.mk_var state_var));
   H.replace !map.state_var expr_ident state_var;
-  SVT.replace cstate.state_var_source_types state_var state_var_source_type;
   (match source with
     | Some source -> SVT.replace !map.source state_var source;
     | None -> ());
@@ -805,7 +775,6 @@ let rec compile ctx gids adt_map scc_map decls =
     |> List.map (fun (_, id, v, is_generated) -> mk_ident id, v, is_generated)
   in
   output.nodes,
-  output.state_var_source_types,
     { G.free_constants = free_constants;
       G.state_var_bounds = output.state_var_bounds;
       G.global_constraints = output.global_constraints }
@@ -1623,7 +1592,6 @@ and compile_node_call node_scope pos ctx cstate map outputs cond restart call_ct
         let sv' = mk_state_var
           ~is_const:true
           map
-          cstate
           (node_scope @ I.reserved_scope)
           (I.mk_string_ident (Format.sprintf "poracle_%d" (po_ct+i) ))
           X.empty_index (* Use dummy value here, replace it below *)
@@ -1776,7 +1744,6 @@ and compile_contract_variables cstate gids ctx map contract_scope node_scope con
                 ~is_input:false
                 ~expr_ident:expr_ident
                 map
-                cstate
                 (node_scope @ contract_namespace @ I.user_scope)
                 ident
                 index
@@ -1934,7 +1901,6 @@ and process_node_inputs cstate ctx map node_scope inputs =
           ~is_input:true
           ~is_const
           map
-            cstate
           (node_scope @ I.user_scope)
           ident
           index
@@ -1971,7 +1937,6 @@ and process_node_outputs cstate ctx map node_scope outputs =
         let possible_state_var = mk_state_var
           ~is_input:false
           map
-            cstate
           (node_scope @ I.user_scope)
           ident
           index
@@ -2096,7 +2061,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
           let possible_state_var = mk_state_var
             ~is_input:false
             map
-            cstate
             (node_scope @ "impl" :: I.user_scope)
             ident
             index
@@ -2139,7 +2103,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
       let over_indices = fun index index_type accum ->
         let possible_state_var = mk_state_var
           map
-          cstate
           (node_scope @ I.reserved_scope)
           ident
           index 
@@ -2176,7 +2139,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
       let over_indices = fun index index_type accum ->
         let possible_state_var = mk_state_var
           map
-          cstate
           (node_scope @ I.reserved_scope)
           ident
           index
@@ -2199,7 +2161,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
       let over_indices = fun index index_type accum ->
         let possible_state_var = mk_state_var
           map
-          cstate
           (node_scope @ I.reserved_scope)
           ident
           index
@@ -2223,7 +2184,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
         let possible_state_var = mk_state_var
           ~is_const
           map
-          cstate
           (node_scope @ I.reserved_scope)
           ident
           index
@@ -2251,7 +2211,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
           let possible_state_var = mk_state_var
             ~is_input:false
             map
-            cstate
             (node_scope @ I.reserved_scope)
             var_id
             index
@@ -2297,7 +2256,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
         let possible_state_var = mk_state_var
           ~is_const:true
           map
-          cstate
           (node_scope @ I.reserved_scope)
           oracle_ident
           index
@@ -2324,7 +2282,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
         let possible_state_var = mk_state_var
           ~is_const:false
           map
-          cstate
           (node_scope @ I.reserved_scope)
           oracle_ident
           index
@@ -2367,7 +2324,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
             ~force_return:true
             ~is_input:false
             map
-            cstate
             (node_scope @ I.reserved_scope)
             var_id
             index
@@ -3037,7 +2993,6 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
         let sofar_assumption = get (mk_state_var
           ~is_input:false
           map
-          cstate
           (node_scope @ I.reserved_scope)
           (mk_ident (HString.mk_hstring "sofar"))
           X.empty_index
@@ -3127,12 +3082,12 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
       (StringMap.bindings gids.GI.history_vars)
   in
   (* H.iter (fun k v -> (Format.printf "State var: %a -> %a@." (I.pp_print_ident true) k StateVar.pp_print_state_var v)) !map.state_var; *)
-  let pp_print_source fmt = function
+  (* let pp_print_source fmt = function
     | Primitive -> Format.pp_print_string fmt "Primitive"
     | Set -> Format.pp_print_string fmt "Set"
     | MapPresence -> Format.pp_print_string fmt "MapPresence"
     | MapBinding -> Format.pp_print_string fmt "MapBinding"
-in
+in *)
   (* StateVar.StateVarHashtbl.iter (fun k v -> (Format.printf "State var: %a -> type: %a@." StateVar.pp_print_state_var k pp_print_source v)) cstate.state_var_source_types; *)
   let (node:N.t) = { node_id;
     is_extern;
@@ -3170,7 +3125,6 @@ and compile_const_decl ?(is_generated=false) cstate ctx map is_local scope = fun
         ?is_const:(Some true)
         ?for_inv_gen:(Some true)
         map
-        cstate
         (scope @ I.user_scope)
         ident
         i

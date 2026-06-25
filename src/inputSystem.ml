@@ -35,7 +35,7 @@ module SVM = SVar.StateVarMap
 module IntSet = Stdlib.Set.Make(Int)
 
 type _ t =
-| Lustre : (N.t S.t list * LustreGlobals.t * LustreAst.declaration list * TypeCheckerContext.tc_context * LustreNodeGen.sv_source StateVar.StateVarHashtbl.t) -> N.t t
+| Lustre : (N.t S.t list * LustreGlobals.t * LustreAst.declaration list * TypeCheckerContext.tc_context) -> N.t t
 | Moxi: (TransSys.t S.t * string list) list -> TransSys.t t
 (* Lustre systems supports multiple entry points (main subsystems) *)
 | Native : TransSys.t S.t -> TransSys.t t
@@ -65,7 +65,7 @@ let read_input_moxi input_file =
 (*let read_input_horn input_file = assert false*)
 
 let ordered_scopes_of (type s) : s t -> Scope.t list = function
-  | Lustre (main_subs, _, _, _, _) ->
+  | Lustre (main_subs, _, _, _) ->
     S.all_subsystems_of_list main_subs
     |> List.map (fun { S.scope } -> scope)
 
@@ -81,7 +81,7 @@ let ordered_scopes_of (type s) : s t -> Scope.t list = function
   | Horn _ -> assert false
 
 let analyzable_subsystems (type s) : s t -> s S.t list = function
-  | Lustre (main_subs, _, _, _, _) ->
+  | Lustre (main_subs, _, _, _) ->
     let subsystems' =
       if Flags.modular () then S.all_subsystems_of_list main_subs
       else main_subs
@@ -124,7 +124,7 @@ let get_testgen_uid () =
 let maximal_abstraction_for_testgen (type s)
 : s t -> Scope.t -> A.assumptions -> A.param option = function
 
-  | Lustre (main_subs, _, _, _, _) -> (fun top assumptions ->
+  | Lustre (main_subs, _, _, _) -> (fun top assumptions ->
 
     (* Collects all subsystems, abstracting them if possible. *)
     let rec collect map = function
@@ -180,7 +180,7 @@ let maximal_abstraction_for_testgen (type s)
 let next_analysis_of_strategy (type s)
 : s t -> 'a -> A.param option = function
 
-  | Lustre (main_subs, _, _, _, _) -> (
+  | Lustre (main_subs, _, _, _) -> (
     fun results ->
       let scope_and_strategy =
         List.map (fun ({ S.scope } as sub) ->
@@ -299,7 +299,7 @@ let mcs_params (type s) (input_system : s t) =
     }
   in
   match input_system with
-  | Lustre (main_subs, _, _, _, _) ->
+  | Lustre (main_subs, _, _, _) ->
     let subs =
       if Flags.modular ()
       then
@@ -350,7 +350,7 @@ let contract_check_params (type s) (input_system : s t) =
   in
 
   match input_system with
-  | Lustre (main_subs, _, _, _, _) -> (
+  | Lustre (main_subs, _, _, _) -> (
     S.all_subsystems_of_list main_subs
     |> List.filter (fun s -> not s.S.has_impl) 
     |> List.map param_for_subsystem
@@ -363,7 +363,7 @@ let interpreter_param (type s) (input_system : s t) =
 
   let scope, abstraction_map =
     match input_system with
-    | Lustre (main_subs, _, _, _, _) ->
+    | Lustre (main_subs, _, _, _) ->
       let {S.scope} as sub =
         match main_subs with
         | [sub] -> sub
@@ -401,7 +401,7 @@ let interpreter_param (type s) (input_system : s t) =
 
 let retrieve_lustre_nodes (type s) : s t -> N.t list =
   (function
-  | Lustre (main_subs, _, _, _, _) -> 
+  | Lustre (main_subs, _, _, _) -> 
     let subsystems = S.all_subsystems_of_list main_subs in
     List.map (fun sb -> sb.S.source) subsystems
   | Moxi _ -> failwith "Unsupported input system: MoXI"
@@ -411,7 +411,7 @@ let retrieve_lustre_nodes (type s) : s t -> N.t list =
 
 let retrieve_lustre_nodes_of_scope (type s) : s t -> Scope.t -> N.t list =
   (function
-  | Lustre (main_subs, _, _, _, _) -> (fun scope ->
+  | Lustre (main_subs, _, _, _) -> (fun scope ->
     S.find_subsystem_of_list main_subs scope |> N.nodes_of_subsystem
     )
   | Moxi _ -> failwith "Unsupported input system: MoXI"
@@ -431,7 +431,7 @@ let contain_partially_defined_system (type s) (in_sys : s t) (top : Scope.t) =
 
 let get_lustre_node (type s) (input_system : s t) scope =
   match input_system with
-  | Lustre (main_subs, _, _, _, _) -> (
+  | Lustre (main_subs, _, _, _) -> (
     try Some (S.find_subsystem_of_list main_subs scope).S.source
     with Not_found -> None
   )
@@ -486,7 +486,7 @@ let lustre_definitions_of_state_var (type s) (input_system : s t) state_var =
 
 let lustre_source_ast (type s) (input_system : s t) =
   match input_system with
-  | Lustre (_,_,ast,_,_) -> ast
+  | Lustre (_,_,ast,_) -> ast
   | Moxi _ -> failwith "Unsupported input system: MoXI"
   | Native _ -> failwith "Unsupported input system: Native"
   | Horn _ -> failwith "Unsupported input system: Horn"
@@ -500,7 +500,7 @@ let trans_sys_of_analysis (type s)
 ?slice_to_prop
 : s t -> A.param -> TransSys.t * s t = function
 
-  | Lustre (main_subs, globals, ast, ctx, sv_source_types) -> (
+  | Lustre (main_subs, globals, ast, ctx) -> (
     function analysis ->
       let t, s =
           let options =
@@ -514,7 +514,7 @@ let trans_sys_of_analysis (type s)
           LustreTransSys.trans_sys_of_nodes
             ~options globals main_subs analysis
       in
-      t, Lustre ([s], globals, ast, ctx, sv_source_types)
+      t, Lustre ([s], globals, ast, ctx)
     )
 
   | Moxi checks -> (function analysis ->
@@ -533,12 +533,12 @@ let pp_print_path_pt
 (type s) ?(full_contract = false) (input_system : s t) trans_sys first_is_init ppf model =
   match input_system with 
 
-  | Lustre (main_subs, globals, _, _, sv_source_types) ->
+  | Lustre (main_subs, globals, _, _) ->
     let sub =
       let scope = TransSys.scope_of_trans_sys trans_sys in
       S.find_subsystem_of_list main_subs scope
     in
-    LustrePath.pp_print_path_pt ~full_contract:full_contract trans_sys sv_source_types globals sub first_is_init  ppf model
+    LustrePath.pp_print_path_pt ~full_contract:full_contract trans_sys globals sub first_is_init  ppf model
 
   | Moxi _ ->
     Format.eprintf "pp_print_path_pt not implemented for MoXI input@.";
@@ -557,7 +557,7 @@ let pp_print_path_xml
 
   match input_system with 
 
-  | Lustre (main_subs, globals, _, _, _) ->
+  | Lustre (main_subs, globals, _, _) ->
     let sub =
       let scope = TransSys.scope_of_trans_sys trans_sys in
       S.find_subsystem_of_list main_subs scope
@@ -581,13 +581,13 @@ let pp_print_path_json_testgen
 
   match input_system with
 
-  | Lustre (main_subs, globals, _, _, sv_types) ->
+  | Lustre (main_subs, globals, _, _) ->
     let sub =
       let scope = TransSys.scope_of_trans_sys trans_sys in
       S.find_subsystem_of_list main_subs scope
     in
     LustrePath.pp_print_path_json_testgen
-      trans_sys sv_types globals sub first_is_init ppf model
+      trans_sys globals sub first_is_init ppf model
 
     | Moxi _ ->
     Format.eprintf "pp_print_path_json_testgen not implemented for MoXI input@.";
@@ -606,13 +606,13 @@ let pp_print_path_json
 
   match input_system with
 
-  | Lustre (main_subs, globals, _, _, sv_source_types) ->
+  | Lustre (main_subs, globals, _, _) ->
     let sub =
       let scope = TransSys.scope_of_trans_sys trans_sys in
       S.find_subsystem_of_list main_subs scope
     in
     LustrePath.pp_print_path_json
-      trans_sys sv_source_types globals sub first_is_init ppf model
+      trans_sys globals sub first_is_init ppf model
 
   | Moxi _ ->
     Format.eprintf "pp_print_path_json not implemented for MoXI input@.";
@@ -629,7 +629,7 @@ let pp_print_path_in_csv
 (type s) (input_system : s t) trans_sys first_is_init ppf model =
   match input_system with
 
-  | Lustre (main_subs, globals, _, _, _) ->
+  | Lustre (main_subs, globals, _, _) ->
     let sub =
       let scope = TransSys.scope_of_trans_sys trans_sys in
       S.find_subsystem_of_list main_subs scope
@@ -650,7 +650,7 @@ let pp_print_path_in_csv
 
 let reconstruct_lustre_streams (type s) (input_system : s t) state_vars =
   match input_system with 
-  | Lustre (main_subs, _, _, _, _) ->
+  | Lustre (main_subs, _, _, _) ->
     LustrePath.reconstruct_lustre_streams main_subs state_vars
   | Moxi _ -> assert false
   | Native _ -> assert false
@@ -752,7 +752,7 @@ let slice_to_abstraction
   match input_sys with 
 
   (* Slice Lustre subnode to property term *)
-  | Lustre (main_subs, globals, ast, ctx, sv_source_types) ->
+  | Lustre (main_subs, globals, ast, ctx) ->
 
     let subsystem' =
       let sub = S.find_subsystem_of_list main_subs scope in
@@ -760,7 +760,7 @@ let slice_to_abstraction
           (Flags.slice_nodes () == `On) analysis sub
     in
 
-    Lustre ([subsystem'], globals, ast, ctx, sv_source_types)
+    Lustre ([subsystem'], globals, ast, ctx)
 
   (* No slicing in native input *)
   | _ -> input_sys
@@ -864,7 +864,7 @@ let slice_to_abstraction_and_property
     match input_sys with 
 
     (* Slice Lustre subnode to property term *)
-    | Lustre (main_subs, globals, ast, ctx, sv_source_types) ->
+    | Lustre (main_subs, globals, ast, ctx) ->
 
       let subsystem' =
         let sub = S.find_subsystem_of_list main_subs scope in
@@ -872,7 +872,7 @@ let slice_to_abstraction_and_property
           analysis' prop' sub
       in
 
-      Lustre ([subsystem'], globals, ast, ctx, sv_source_types)
+      Lustre ([subsystem'], globals, ast, ctx)
 
     (* No slicing in MoXI input *)
     | Moxi m -> Moxi m
@@ -888,7 +888,7 @@ let slice_to_abstraction_and_property
 let contract_gen_param (type s): s t -> Scope.t -> (A.param * (Scope.t -> N.t)) =
 fun sys -> fun top ->
   match sys with
-  | Lustre (main_subs, _, _, _, _) -> (
+  | Lustre (main_subs, _, _, _) -> (
     let scope_and_strategy =
       List.map (fun ({ S.scope } as sub) ->
         scope, S.strategy_info_of sub)
@@ -914,7 +914,7 @@ fun sys -> fun top ->
 let state_var_dependencies (type s):
   s t -> (StateVar.StateVarSet.t StateVar.StateVarMap.t) Scope.Map.t =
 function
-  | Lustre (subsystem, _, _, _, _) -> (
+  | Lustre (subsystem, _, _, _) -> (
 
     S.all_subsystems_of_list subsystem
     |> List.rev (* Process leaves first *)
@@ -971,7 +971,7 @@ function
 
 let get_bv_sizes' (type s) : (IntSet.t -> SVar.t -> IntSet.t) -> s t -> IntSet.t = 
 fun over_svar -> function 
-| Lustre (main_subs, globals, _, _, _) -> 
+| Lustre (main_subs, globals, _, _) -> 
   let subsystems = S.all_subsystems_of_list main_subs in 
   let sources = List.map (fun subsys -> subsys.S.source) subsystems in 
   (* Get sizes from every Lustre node *)
@@ -1032,7 +1032,7 @@ fun sys -> fun top ->
   | Horn _ -> []
 
 let prefix_system (type s) (input_system : s t) prefix : s t = match input_system with
-  | Lustre (main_subs, globals, ast, ctx, sv_source_types) ->
+  | Lustre (main_subs, globals, ast, ctx) ->
 
     let h_prefix = HString.mk_hstring prefix in
 
@@ -1171,14 +1171,14 @@ let prefix_system (type s) (input_system : s t) prefix : s t = match input_syste
       rename root
     in
     let main_subs = List.map rename_sys main_subs in
-    Lustre (main_subs, globals, ast, ctx, sv_source_types)
+    Lustre (main_subs, globals, ast, ctx)
   | _ -> input_system
 
 
 let monitor_param (type s) (input_system : s t) =
   let scope, abstraction_map =
     match input_system with
-    | Lustre (main_subs, _,  _, _, _) ->
+    | Lustre (main_subs, _,  _, _) ->
       
       let {S.scope} as sub =
         match main_subs with
@@ -1224,7 +1224,7 @@ let monitor_param (type s) (input_system : s t) =
 
 let types_of_vars (type s) (input_system : s t) =
   match input_system with
-  | Lustre (_, _, _, ctx, _) ->
+  | Lustre (_, _, _, ctx) ->
     List.fold_left (fun acc decl ->
       match decl with
       | LustreAst.NodeDecl (_, (_, _, _, _, inputs, outputs, locals, _, _))
