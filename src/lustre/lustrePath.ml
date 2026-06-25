@@ -560,10 +560,20 @@ let node_path_of_instance
   (* Format.printf "node_path_of_instance@.@." ; *)
 
   (* Record trace of node calls *)
-  let trace = 
+  let trace =
     List.map
-      (fun (t, { T.pos }, _) -> 
-         (TransSys.scope_of_trans_sys t |> I.of_scope, pos))
+      (fun (t, { T.pos }, _) ->
+         (* For a recursive function, the subsystem scope is prefixed with a
+            recursion tag that distinguishes unrollings (e.g. [rec_5; name]);
+            the node name is the last element. This ident is only used to
+            display the call trace, where the internal tag should not appear,
+            so we keep just the node name. [of_scope] also only accepts a flat
+            (single-id) scope. For a non-recursive node the scope already is
+            [name], so this is a no-op. *)
+         let ident =
+           TransSys.scope_of_trans_sys t |> List.rev |> List.hd
+         in
+         ([ident] |> I.of_scope, pos))
       instances
   in
 
@@ -1130,7 +1140,7 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
 
   (* Functions derived from constants are printed along with the global constants. 
      Type ascriptions not shown. *)
-  if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription then 
+  if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription || NI.get_node_type node_id = ClockedExpr then 
     pp_print_lustre_path_pt' false const_map const_funcs sv_types ppf tl 
   else 
 
@@ -1153,6 +1163,7 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     | DefinedConstant -> "Global constant"
     | FreeConstant -> "Global constant"
     | Choose -> "'Choose' operator"
+    | ClockedExpr -> "clocked expression"
     | TypeAscription -> "Type ascription operator"
   in
   
@@ -1542,7 +1553,7 @@ let rec pp_print_lustre_path_xml' is_top const_map const_funcs ppf = function
 
     (* Functions derived from constants are printed along with the global constants. 
        Type ascriptions not shown. *)
-    if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription then 
+    if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription || NI.get_node_type node_id = ClockedExpr then 
       pp_print_lustre_path_xml' false const_map const_funcs ppf tl 
     else
 
@@ -2078,7 +2089,7 @@ let rec pp_print_lustre_path_json' is_top const_map const_funcs (sv_types: Lustr
 
     (* Functions derived from constants are printed along with the global constants. 
        Type ascriptions not shown. *)
-    if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription then 
+    if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription || NI.get_node_type node_id = ClockedExpr then 
       pp_print_lustre_path_json' false const_map const_funcs sv_types ppf tl 
     else
 

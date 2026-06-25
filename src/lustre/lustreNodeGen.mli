@@ -22,6 +22,8 @@ type sv_source = Primitive | Set | MapPresence | MapBinding
 
 val compile : TypeCheckerContext.tc_context
 -> GeneratedIdentifiers.t NodeId.Map.t
+-> LustreDesugarADTs.adt_map
+-> int HString.HStringMap.t
 -> LustreAst.declaration list
 -> LustreNode.t list * sv_source StateVar.StateVarHashtbl.t * LustreGlobals.t
  

@@ -325,7 +325,7 @@ let proved_pt mdl level trans_sys k prop =
   if 
     not (Property.prop_status_known (Property.get_prop_status property))
   then (
-    let prop_type = match property.prop_source with 
+    let prop_type = match Property.get_prop_original_source property with 
       | Candidate None -> "Candidate property"
       | Candidate Some (Generated _) -> "Generated candidate property"
       | Generated _ -> "Generated property"
@@ -845,9 +845,13 @@ let prop_attributes_xml trans_sys prop_name =
         let fname, lnum, cnum = file_row_col_of_pos pos in
         Format.asprintf " line=\"%d\" column=\"%d\" scope=\"%s\" source=\"NonVacuityCheck\"%a"
           lnum cnum (String.concat "." scope) pp_print_fname fname
+    | Property.TerminationCheck pos ->
+        let fname, lnum, cnum = file_row_col_of_pos pos in
+        Format.asprintf " line=\"%d\" column=\"%d\" source=\"Termination\"%a"
+          lnum cnum pp_print_fname fname
   in
 
-  " isCandidate=\"" ^ (string_of_bool (Property.is_candidate prop.Property.prop_source)) 
+  " isCandidate=\"" ^ (string_of_bool (Property.is_candidate prop)) 
   ^ "\"" ^ get_attributes prop.Property.prop_source
 
 
@@ -1188,10 +1192,15 @@ let prop_attributes_json ppf trans_sys prop_name =
     )
     | Property.Candidate None -> ()
     | Property.Candidate (Some source) -> get_attributes source
+    | Property.TerminationCheck pos ->
+        let fname, lnum, cnum = file_row_col_of_pos pos in
+        Format.fprintf ppf
+          "%a\"line\" : %d,@,\"column\" : %d,@,\"source\" : \"Termination\",@,"
+          pp_print_fname fname lnum cnum
   in
 
   Format.fprintf ppf "\"isCandidate\" : \"%s\",@,"
-      (string_of_bool (Property.is_candidate prop.Property.prop_source));
+      (string_of_bool (Property.is_candidate prop));
   (match prop.Property.prop_expr with 
   | Some expr -> 
   Format.fprintf ppf "\"expr\" : \"%s\",@,"
@@ -1691,6 +1700,7 @@ let log_contractck_analysis_start in_sys scope =
         | TypeAscription -> "type ascription operator"
         | FreeConstant -> "global constant"
         | DefinedConstant -> "global constant"
+        | ClockedExpr -> "clocked expression"
         | Choose -> "'choose' operator")
         NI.pp_print_node_id_user_name node_id
     )
@@ -1710,6 +1720,7 @@ let log_contractck_analysis_start in_sys scope =
         | TypeAscription -> "type ascription operator"
         | DefinedConstant -> "global constant"
         | FreeConstant -> "global constant"
+        | ClockedExpr -> "clocked expression"
         | Choose -> "'choose' operator");
       analysis_start_not_closed := true
     )
@@ -1730,6 +1741,7 @@ let log_contractck_analysis_start in_sys scope =
         | TypeAscription -> "type ascription operator"
         | DefinedConstant -> "global constant"
         | FreeConstant -> "global constant"
+        | ClockedExpr -> "clocked expression"
         | Choose -> "'choose' operator");
       analysis_start_not_closed := true
 

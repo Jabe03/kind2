@@ -341,7 +341,9 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
           | LustreIndex.RecordIndex _
           | LustreIndex.TupleIndex _
           | LustreIndex.ListIndex _
-          | LustreIndex.AbstractTypeIndex _ -> true) indexes in
+          | LustreIndex.AbstractTypeIndex _
+          | LustreIndex.AdtTagIndex _
+          | LustreIndex.AdtPayloadIndex _ -> true) indexes in
     let full_name =
       Format.asprintf "%s%a" name (LustreIndex.pp_print_index true) indexes
     in

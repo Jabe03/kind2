@@ -27,12 +27,15 @@ type error_kind = Unknown of string
   | DuplicateOutput of HString.t * Lib.position
   | UndefinedOutput of HString.t 
   | DuplicateProperty of HString.t
+  | InvalidPropertyName of HString.t
   | UndefinedNode of HString.t
   | UndefinedContract of HString.t
   | DanglingIdentifier of HString.t
   | QuantifiedVariableInPre of HString.t
   | QuantifiedVariableInNodeArgument of HString.t * HString.t
   | SymbolicArrayIndexInNodeArgument of HString.t * HString.t
+  | QuantifiedVariableInLazyGuardedNodeCall of HString.t * HString.t
+  | SymbolicArrayIndexInLazyGuardedNodeCall of HString.t * HString.t
   | QuantifiedVariableInTypeAscription of HString.t 
   | SymbolicArrayIndexInTypeAscription of HString.t 
   | IllegalNodeCall of (HString.t * string)
@@ -56,6 +59,11 @@ type error_kind = Unknown of string
   | TransparentWithoutBody of LustreAst.ident
   | IllegalHistoryVar of LustreAst.ident
   | InductiveVarsWithArrayConstr of LustreAst.expr
+  | DuplicatePatternVariable of HString.t
+  | MissingDecreasesClause of HString.t
+  | MisplacedAuto
+  | LemmaCallOutsideCallStatement of HString.t
+  | CallStatementCallsNonLemma of HString.t
 
 type error = [
   | `LustreSyntaxChecksError of Lib.position * error_kind

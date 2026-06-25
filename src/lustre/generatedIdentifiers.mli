@@ -74,7 +74,13 @@ type t = {
     HString.t * 
     LustreAst.lustre_type * 
     LustreAst.lustre_type) list;
-  set_insertions: (HString.t * 
+  map_subtractions: (HString.t *
+    LustreAst.expr *
+    LustreAst.expr *
+    HString.t *
+    LustreAst.lustre_type *
+    LustreAst.lustre_type) list;
+  set_insertions: (HString.t *
     LustreAst.expr * 
     LustreAst.expr * 
     HString.t * 
@@ -110,6 +116,20 @@ val ctr_id : HString.t
 
 (** Checks if a variable name corresponds to an iboracle *)
 val var_is_iboracle: HString.t -> bool
+
+(* String constant used as the suffix of fresh locals capturing the discarded
+   results of a call statement (see lustreNameCalls.ml). *)
+val discarded_output : string
+
+(** Checks if a variable name corresponds to a discarded call-statement result *)
+val var_is_discarded_output: HString.t -> bool
+
+(* String constant used as a segment of fresh locals introduced to desugar the
+   'last' operator (see lustreDesugarLast.ml). *)
+val last_local : string
+
+(** Checks if a variable name corresponds to a 'last'-operator local *)
+val var_is_last_local: HString.t -> bool
 
 val empty : unit -> t
 
