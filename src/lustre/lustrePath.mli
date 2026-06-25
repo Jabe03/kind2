@@ -31,7 +31,7 @@ val pp_print_path_xml :
 val pp_print_path_pt :
   ?full_contract:bool -> 
   TransSys.t ->
-  LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
+  LustreGlobals.t -> LustreNode.t SubSystem.t -> bool -> (HString.t * string list) list ->
   Format.formatter -> Model.path -> unit
 
 (** Output a counterexample as a Lustre execution in JSON format *)

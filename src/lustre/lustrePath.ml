@@ -1055,18 +1055,42 @@ let pp_print_stream_string_pt
     stream_string_values
 
 
+    (* Print raw values given dressed up as streams *)
+  let pp_print_string_valued_stream_value_pt val_width ppf v=   
+      let value_string = v in
+      let padding = val_width - (width_of_string value_string) in
+      Format.fprintf ppf "%*s%s" padding "" v
+  
+  let pp_print_string_valued_stream_pt
+    ident_width val_width ppf (stream_name, stream_values) = 
+  (* Break lines if necessary and indent correctly *)
+  Format.fprintf
+    ppf
+    "@[<hov %d>@{<blue_b>%-*s@} %a@]"
+    (ident_width + 1)
+    ident_width
+    (HString.string_of_hstring stream_name)
+    (pp_print_list (pp_print_string_valued_stream_value_pt val_width) "@ ")
+    stream_values 
+  
+
 (* Output state variables and their sequences of values under a
    header, or output nothing if the list is empty *)
-let pp_print_stream_section_pt ident_width val_width sect ppf = function 
-  | [] -> ()
-  | l -> 
+let pp_print_stream_section_pt ?(provided_inputs = []) ident_width val_width sect ppf streams = match streams, provided_inputs with 
+  | [], [] -> ()
+  | l, vals -> 
     Format.fprintf
       ppf
       "== @{<b>%s@} ==@,\
-       %a@,"
+       %a@,%a@,"
       sect
+      (pp_print_list (pp_print_string_valued_stream_pt ident_width val_width) "@,") 
+      vals
       (pp_print_list (pp_print_stream_pt ident_width val_width) "@,") 
       l
+      
+
+
 
 (* For modes *)
 let pp_print_modes_section_pt full_contract ident_width val_width mode_ident ppf = function 
@@ -1112,7 +1136,7 @@ let rec get_widths_for_contract ident_width values_width contract_trace = match 
 
   (* Output sequences of values for each stream of the nodes in the list
    and for all its called nodes *)
-let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_funcs ppf = function
+let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_funcs provided_inputs ppf = function
 
 (* All nodes printed *)
 | [] -> ()
@@ -1128,7 +1152,7 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
   (* Functions derived from constants are printed along with the global constants. 
      Type ascriptions not shown. *)
   if NI.get_node_type node_id = FreeConstant || NI.get_node_type node_id = TypeAscription || NI.get_node_type node_id = ClockedExpr then 
-    pp_print_lustre_path_pt' false const_map const_funcs ppf tl 
+    pp_print_lustre_path_pt' false const_map const_funcs provided_inputs ppf tl 
   else 
 
   let is_visible = N.state_var_is_visible node in
@@ -1169,6 +1193,11 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     |> List.filter (fun (_, sv) -> is_visible sv)
     |> streams_to_values model ident_width val_width []
   in
+  
+  let ident_width, val_width = List.fold_left (fun (iw,vw) (name, vals)-> (max iw (width_of_string (HString.string_of_hstring name)), 
+        (List.fold_left (fun width value -> 
+          max width (width_of_string value)) vw vals)
+  )) (ident_width,val_width) provided_inputs in 
 
   (* Remove index of position in output for printing *)
   let ident_width, val_width, outputs' = 
@@ -1270,7 +1299,7 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     (pp_print_modes_section_pt full_contract ident_width val_width mode_ident) contract_info
     (pp_print_stream_section_pt ident_width val_width "Global Constants") globals'
     (pp_print_stream_section_pt ident_width val_width "Constants") constants'
-    (pp_print_stream_section_pt ident_width val_width "Inputs") inputs'
+    (pp_print_stream_section_pt ~provided_inputs ident_width val_width "Inputs") inputs'
     (pp_print_stream_section_pt ident_width val_width "Outputs") outputs'
     (pp_print_stream_section_pt ident_width val_width "Ghosts") ghosts'
     (pp_print_stream_section_pt ident_width val_width "Locals") locals';
@@ -1280,12 +1309,13 @@ let rec pp_print_lustre_path_pt' ?(full_contract=false) is_top const_map const_f
     false
     const_map
     const_funcs
+    provided_inputs
     ppf
     (subnodes @ tl)
 
 | _ :: tl ->
   
-  pp_print_lustre_path_pt' false const_map const_funcs ppf tl
+  pp_print_lustre_path_pt' false const_map const_funcs provided_inputs ppf tl
 
 let get_const_func_info n = 
   let rec get_const_funcs (Node (top, path, _, _, _, _, _, subnodes)) = 
@@ -1316,24 +1346,24 @@ let get_const_func_info n =
 
 (* Output sequences of values for each stream of the node and for all
    its called nodes *)
-let pp_print_lustre_path_pt ?(full_contract = false) ppf (lustre_path, const_map) = 
+let pp_print_lustre_path_pt ?(full_contract = false) provided_inputs ppf (lustre_path, const_map) = 
   (* Collect information on functions derived from global constants *)
   let const_funcs = get_const_func_info (snd lustre_path) in
   let const_funcs = List.map (fun (id, ty, vals, _) -> id, ty, vals) const_funcs in
 
   (* Delegate to recursive function *)
-  pp_print_lustre_path_pt' ~full_contract true const_map const_funcs ppf [lustre_path]
+  pp_print_lustre_path_pt' ~full_contract true const_map const_funcs provided_inputs ppf [lustre_path]
 
 
 (* Output a hierarchical model as plain text *)
 let pp_print_path_pt
-  ?(full_contract = false) trans_sys globals subsystems first_is_init ppf model
+  ?(full_contract = false) trans_sys globals subsystems first_is_init provided_inputs ppf model
   =
   (* Create the hierarchical model *)
   node_path_of_subsystems
     globals first_is_init trans_sys model subsystems
   (* Output as plain text *)
-  |> pp_print_lustre_path_pt ~full_contract:full_contract ppf
+  |> pp_print_lustre_path_pt ~full_contract:full_contract provided_inputs ppf
 
 
 (* ********************************************************************** *)

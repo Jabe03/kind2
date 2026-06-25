@@ -86,7 +86,7 @@ val trans_sys_of_analysis:
   'a t -> Analysis.param -> TransSys.t * 'a t
 
 (** Output a path in the input system *)
-val pp_print_path_pt : ?full_contract:bool -> _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit
+val pp_print_path_pt : ?full_contract:bool -> ?provided_inputs:(HString.t * string list) list -> _ t -> TransSys.t -> bool ->  Format.formatter -> Model.path -> unit
 
 (** Output a path in the input system *)
 val pp_print_path_xml : _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit

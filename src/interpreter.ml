@@ -73,7 +73,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
   let vars_types = input_sys |> InputSystem.types_of_vars in
 
   (* Read inputs from file *)
-  let (inputs, inputs_str) =
+  let (inputs, (inputs_str: (HString.t * string list) list)) =
     if input_file = "" then ([], [])
     else
       try InputParser.read_file  ~only_inputs:(not contract_monitor) input_scope input_file vars_types
@@ -83,9 +83,9 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
         raise (Failure "main")
   in
 
-  Format.printf "DEBUG: Inputs read as strings: @.%a@." (Lib.pp_print_list (fun ppf map -> (
-    Format.fprintf ppf "[@.%a@.]" (Lib.pp_print_list (fun ppf (key, value) -> Format.fprintf ppf "%a     %s" HString.pp_print_hstring key value) "@.") (HString.HStringMap.bindings map)
-  )) "@.") inputs_str;
+  (* Format.printf "DEBUG: Inputs read as strings: @.%a@." (Lib.pp_print_list (fun ppf (name, values) -> (
+    Format.fprintf ppf "[@.%a@.]" (Lib.pp_print_list (fun ppf value -> Format.fprintf ppf "%a     %s" HString.pp_print_hstring name value) "@.") (values)
+  )) "@.") (inputs_str); *)
 
   let nb_inputs = List.filter StateVar.is_input trans_svars |> List.length in
 
@@ -309,6 +309,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
       (* Output execution path *)
       KEvent.execution_path
         ~full_contract:contract_monitor
+        ~provided_inputs: inputs_str
         input_sys
         trans_sys 
         path

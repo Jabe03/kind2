@@ -17,11 +17,30 @@
 *)
 open Lib
 
+
+let map_assignment_str: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else " := "
+let map_entry_separator_str: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else "; "
+let map_entry_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else ""
+let map_entry_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else ""
+let map_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "["
+let map_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else "]"
+
+
+let tuple_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "("
+let tuple_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else ")"
+let tuple_separator: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else ", "
+
+let set_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "{"
+let set_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else "}"
+let set_separator: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else ", "
+
+let pretty_print ppf symbol = Format.fprintf ppf symbol
+
 (* ====================== CSV ======================== *)
 
 (* typing errors *)
 exception Type_error of Type.t * string
-
+module HSM = HString.HStringMap
 let decimal_of_string s =
   match String.split_on_char '/' s with
   | [s] -> Term.mk_dec (Decimal.of_string s)
@@ -491,7 +510,7 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
             get_string_reps_sets_maps' scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
           ) 
       with Invalid_argument _ -> raise (Not_an_input ("Tuple " ^ name ^ " has incorrect length"))) in
-      Format.asprintf "(%a)" (Lib.pp_print_list Format.pp_print_string ", ") vals
+      Format.asprintf "%a%a%a" Format.fprintf tuple_left_wrap (Lib.pp_print_list Format.pp_print_string tuple_separator) vals Format.fprintf tuple_right_wrap
   | `List lst, LustreAst.Map (_, key_type, value_type) ->
     (* Can represent a map *)
       let (keys, values) = 
@@ -504,12 +523,20 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
             ((new_key :: keys , new_value :: values))
           | _ -> raise (Not_an_input ("Tried to parse as map " ^ name))
 
-        ) ([], []) lst  in
+        ) ([], []) lst  in     
       
+      Format.asprintf "%a%t%a" 
+        pretty_print map_left_wrap 
+        (fun ppf -> (Lib.pp_print_list2i (fun ppf _ k v -> 
+          Format.fprintf ppf "%a%s%a%s%a" 
+            pretty_print map_entry_left_wrap 
+            k 
+            pretty_print map_assignment_str 
+            v 
+            pretty_print map_entry_right_wrap
+          ) map_entry_separator_str ppf keys values)) 
+        pretty_print map_right_wrap
 
-      
-      
-      Format.asprintf "[%t]" (fun ppf -> (Lib.pp_print_list2i (fun ppf _ k v -> Format.fprintf ppf "%s := %s" k v) "; " ppf keys values))
   | `List lst, LustreAst.Set (_, ty) ->
     (* Can represent a set *)
     let elements = 
@@ -518,7 +545,10 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
           let element =  (get_string_reps_sets_maps' scope name indexes arr_indexes y ty ) in
           (element :: elements)
       ) ([]) lst  in
-      Format.asprintf "{%a}" (Lib.pp_print_list Format.pp_print_string ", ") elements
+      Format.asprintf "%a%a%a" 
+        pretty_print set_left_wrap
+        (Lib.pp_print_list Format.pp_print_string set_separator) elements
+        pretty_print set_right_wrap
   | (`Bool _  as json),  (Bool _ as lus_typ)
   | (`String _ as json), (Int _ as lus_typ)
   | (`String _ as json), (Real _ as lus_typ)
@@ -569,13 +599,21 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
               sv_name_type_map
               |> HString.HStringMap.find (HString.mk_hstring name)
             in
-            let value =
+            match expected_type with 
+            | LustreAst.Map _
+            | LustreAst.Set _ ->
+            (let value =
               get_string_reps_sets_maps' top_scope_index name [] [] json expected_type
             in
-            HString.HStringMap.add ( HString.mk_hstring name) value acc)
+            HString.HStringMap.add ( HString.mk_hstring name) [value] acc)
+            | _ -> acc
+            )
         HString.HStringMap.empty
 
 
+let invert_instant_dim (input: string list HString.HStringMap.t list) : (string list) HString.HStringMap.t = 
+  List.fold_left (fun acc value -> HSM.union (fun k l r -> Some (List.append l r)  ) acc value ) HSM.empty input
+  
     (* Parse a JSON input file *)
 let read_json_file ?(only_inputs=true) top_scope_index filename sv_name_type_map =
   let json =
@@ -591,7 +629,7 @@ let read_json_file ?(only_inputs=true) top_scope_index filename sv_name_type_map
   (
   json_list |> List.map (read_vars ~only_inputs:only_inputs top_scope_index sv_name_type_map) |> List.flatten |> group_by_var,
   json_list
-  |> List.map (get_str_values_of_vars top_scope_index sv_name_type_map))
+  |> List.map (get_str_values_of_vars top_scope_index sv_name_type_map) |> invert_instant_dim |> HSM.bindings) 
 
 (* ====================== GENERAL ======================== *)
 
