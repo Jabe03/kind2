@@ -38,11 +38,13 @@ val pp_print_path_pt :
 val pp_print_path_json :
   TransSys.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
+  (HString.t * string list) list -> LustreAst.lustre_type HString.HStringMap.t ->
   Format.formatter -> Model.path -> unit
 
 val pp_print_path_json_testgen :
   TransSys.t ->
   LustreGlobals.t -> LustreNode.t SubSystem.t -> bool ->
+  (HString.t * string list) list -> LustreAst.lustre_type HString.HStringMap.t ->
   Format.formatter -> Model.path -> unit
 
 

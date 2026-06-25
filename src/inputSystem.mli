@@ -86,17 +86,18 @@ val trans_sys_of_analysis:
   'a t -> Analysis.param -> TransSys.t * 'a t
 
 (** Output a path in the input system *)
-val pp_print_path_pt : ?full_contract:bool -> ?provided_inputs:(HString.t * string list) list -> _ t -> TransSys.t -> bool ->  Format.formatter -> Model.path -> unit
+val pp_print_path_pt : ?full_contract:bool -> ?provided_inputs:(HString.t * string list) list -> ?provided_types:LustreAst.lustre_type HString.HStringMap.t
+-> _ t -> TransSys.t -> bool ->  Format.formatter -> Model.path -> unit
 
 (** Output a path in the input system *)
 val pp_print_path_xml : _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit
 
 (** Output a path in the input system *)
-val pp_print_path_json : _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit
+val pp_print_path_json : ?provided_inputs:(HString.t * string list) list -> ?provided_types:LustreAst.lustre_type HString.HStringMap.t -> _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit
 
 (** Output a path in the input system. The format for this path is the same format that 
 the Interpreter module expects as input. *)
-val pp_print_path_json_testgen :  _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit
+val pp_print_path_json_testgen : ?provided_inputs:(HString.t * string list) list -> ?provided_types:LustreAst.lustre_type HString.HStringMap.t -> _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit
 
 (** Output a model as a sequnce of inputs in CSV. *)
 val pp_print_path_in_csv : _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit

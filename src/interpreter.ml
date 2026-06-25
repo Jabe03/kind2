@@ -310,6 +310,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
       KEvent.execution_path
         ~full_contract:contract_monitor
         ~provided_inputs: inputs_str
+        ~provided_types: vars_types
         input_sys
         trans_sys 
         path
