@@ -71,10 +71,9 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
   (*trans_svars |> List.iter (fun sv -> KEvent.log_uncond "%a : %a" StateVar.pp_print_state_var sv Type.pp_print_type (StateVar.type_of_state_var sv)) ; *)
 
   let vars_types = input_sys |> InputSystem.types_of_vars in
-  (* List.iter (fun (id, ty) -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars; *)
-  (* HString.HStringMap.iter (fun id ty -> KEvent.log_uncond "Variable %a has type %a@." HString.pp_print_hstring id LustreAst.pp_print_lustre_type ty) vars_types; *)
+
   (* Read inputs from file *)
-  let (inputs, (inputs_str: string HString.HStringMap.t list)) =
+  let (inputs, inputs_str) =
     if input_file = "" then ([], [])
     else
       try InputParser.read_file  ~only_inputs:(not contract_monitor) input_scope input_file vars_types
@@ -93,7 +92,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
   (* Check that constant inputs are indeed constant. *)
   inputs |> List.iter (
     function
-    | ((sv, _), (head :: tail)) when StateVar.is_const sv ->
+    | ((sv, _), head :: tail) when StateVar.is_const sv ->
       tail |> List.fold_left (
         fun acc value ->
           if acc != value then (
@@ -229,20 +228,13 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
                 fun acc (i, idx_ty) ->
                    if idx_ty = InputParser.SetMapPresenceIndex then idxs_seen := i :: !idxs_seen; 
                 Term.mk_select acc (i)
-                (* Records tuern into multidimensional array, where each index is a field
-                    { x: int; y: real} -->
-                      [
-                      (x_index): [1,2,3,4](map/set values),
-                      (y_index): [2.2, 3.4.5.5]
-                      ]
-                *)
               ) var indexes |> Term.convert_select in
               if !idxs_seen != [] then add_defined_index instant state_var !idxs_seen;
               (* Constrain variable to its value at instant *)
               let equation = 
                 Term.mk_eq [var; instant_value] 
               in
-              
+
               (* Assert equation *)
               SMTSolver.assert_term solver equation
             )
