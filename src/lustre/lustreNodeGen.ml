@@ -277,7 +277,6 @@ let mk_state_var
     in
     state_var, true)
   in
-  (* Classify the state variable source for Lustre map/set tracking. *)
   SVT.replace !map.bounds state_var (bounds_of_index index);
   H.replace !map.expr expr_ident (compute_expr (E.mk_var state_var));
   H.replace !map.state_var expr_ident state_var;
@@ -3059,14 +3058,7 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
       TM.empty
       (StringMap.bindings gids.GI.history_vars)
   in
-  (* H.iter (fun k v -> (Format.printf "State var: %a -> %a@." (I.pp_print_ident true) k StateVar.pp_print_state_var v)) !map.state_var; *)
-  (* let pp_print_source fmt = function
-    | Primitive -> Format.pp_print_string fmt "Primitive"
-    | Set -> Format.pp_print_string fmt "Set"
-    | MapPresence -> Format.pp_print_string fmt "MapPresence"
-    | MapBinding -> Format.pp_print_string fmt "MapBinding"
-in *)
-  (* StateVar.StateVarHashtbl.iter (fun k v -> (Format.printf "State var: %a -> type: %a@." StateVar.pp_print_state_var k pp_print_source v)) cstate.state_var_source_types; *)
+
   let (node:N.t) = { node_id;
     is_extern;
     opacity;

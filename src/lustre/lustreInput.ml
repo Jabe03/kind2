@@ -339,7 +339,7 @@ let of_channel only_parse in_ch =
       let* (ctx, gids, decls, toplevel_nodes, scc_map, _, adt_map) =
         type_check declarations
       in
-      let nodes,globals = LNG.compile ctx gids adt_map scc_map decls in
+      let nodes, globals = LNG.compile ctx gids adt_map scc_map decls in
       let contractck_enabled = List.mem `CONTRACTCK (Flags.enabled ()) in
       let main_nodes = match Flags.lus_main () with
         | Some s -> 
