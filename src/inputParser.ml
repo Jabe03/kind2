@@ -18,21 +18,21 @@
 open Lib
 
 
-let map_assignment_str: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else " := "
-let map_entry_separator_str: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else "; "
-let map_entry_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else ""
-let map_entry_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else ""
-let map_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "["
-let map_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else "]"
+let map_assignment_str () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else " := "
+let map_entry_separator_str () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else "; "
+let map_entry_left_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else ""
+let map_entry_right_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else ""
+let map_left_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "["
+let map_right_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else "]"
 
 
-let tuple_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "("
-let tuple_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else ")"
-let tuple_separator: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else ", "
+let tuple_left_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "("
+let tuple_right_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else ")"
+let tuple_separator () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else ", "
 
-let set_left_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "{"
-let set_right_wrap: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else "}"
-let set_separator: (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else ", "
+let set_left_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "[" else "{"
+let set_right_wrap () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then "]" else "}"
+let set_separator () : (unit, Format.formatter, unit) format  = if Flags.log_format_json () then ", " else ", "
 
 let pretty_print ppf symbol = Format.fprintf ppf symbol
 
@@ -510,7 +510,7 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
             get_string_reps_sets_maps' scope name ((LustreIndex.TupleIndex i)::indexes) arr_indexes  json ty
           ) 
       with Invalid_argument _ -> raise (Not_an_input ("Tuple " ^ name ^ " has incorrect length"))) in
-      Format.asprintf "%a%a%a" Format.fprintf tuple_left_wrap (Lib.pp_print_list Format.pp_print_string tuple_separator) vals Format.fprintf tuple_right_wrap
+      Format.asprintf "%a%a%a" Format.fprintf (tuple_left_wrap ()) (Lib.pp_print_list Format.pp_print_string (tuple_separator ())) vals Format.fprintf (tuple_right_wrap ())
   | `List lst, LustreAst.Map (_, key_type, value_type) ->
     (* Can represent a map *)
       let (keys, values) = 
@@ -526,16 +526,16 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
         ) ([], []) lst  in     
       
       Format.asprintf "%a%t%a" 
-        pretty_print map_left_wrap 
+        pretty_print (map_left_wrap ()) 
         (fun ppf -> (Lib.pp_print_list2i (fun ppf _ k v -> 
           Format.fprintf ppf "%a%s%a%s%a" 
-            pretty_print map_entry_left_wrap 
+            pretty_print (map_entry_left_wrap ()) 
             k 
-            pretty_print map_assignment_str 
+            pretty_print (map_assignment_str ()) 
             v 
-            pretty_print map_entry_right_wrap
-          ) map_entry_separator_str ppf keys values)) 
-        pretty_print map_right_wrap
+            pretty_print (map_entry_right_wrap ())
+          ) (map_entry_separator_str ()) ppf keys values)) 
+        pretty_print (map_right_wrap ())
 
   | `List lst, LustreAst.Set (_, ty) ->
     (* Can represent a set *)
@@ -545,10 +545,11 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
           let element =  (get_string_reps_sets_maps' scope name indexes arr_indexes y ty ) in
           (element :: elements)
       ) ([]) lst  in
+      (* Format.printf "Log format is json? %a. set left wrapper is %a" Format.pp_print_bool (Flags.log_format_json ()) pretty_print (set_left_wrap ()); *)
       Format.asprintf "%a%a%a" 
-        pretty_print set_left_wrap
-        (Lib.pp_print_list Format.pp_print_string set_separator) elements
-        pretty_print set_right_wrap
+        pretty_print (set_left_wrap ())
+        (Lib.pp_print_list Format.pp_print_string (set_separator ())) elements
+        pretty_print (set_right_wrap ())
   | (`Bool _  as json),  (Bool _ as lus_typ)
   | (`String _ as json), (Int _ as lus_typ)
   | (`String _ as json), (Real _ as lus_typ)
