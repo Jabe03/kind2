@@ -226,10 +226,10 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
               let idxs_seen = ref [] in
               let var = List.fold_left (
                 fun acc (i, idx_ty) ->
-                   if idx_ty = InputParser.SetMapPresenceIndex then idxs_seen := i :: !idxs_seen; 
+                   idxs_seen := (i, idx_ty) :: !idxs_seen; 
                 Term.mk_select acc (i)
               ) var indexes |> Term.convert_select in
-              if !idxs_seen != [] then add_defined_index instant state_var !idxs_seen;
+              if List.exists (fun (i, ty) -> ty = InputParser.SetMapPresenceIndex) !idxs_seen then add_defined_index instant state_var (List.map fst !idxs_seen);
               (* Constrain variable to its value at instant *)
               let equation = 
                 Term.mk_eq [var; instant_value] 
@@ -248,7 +248,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
     StateVar.StateVarMap.iter (fun state_var (indexes : Term.t list list) -> (
       (* Format.printf  "Making forall for: %a: %a@." StateVar.pp_print_state_var state_var
           (Lib.pp_print_list (
-            fun ppf i -> Format.fprintf ppf "%a" Term.pp_print_term i
+            fun ppf i -> Format.fprintf ppf "%a" (Lib.pp_print_list Term.pp_print_term ", ") i
           ) ", ") indexes ; *)
       let idx_vars = match indexes with 
         | idx :: _ -> List.map (fun _ -> Var.mk_fresh_var (Type.mk_int ())) idx 

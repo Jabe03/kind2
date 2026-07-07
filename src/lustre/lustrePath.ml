@@ -1911,7 +1911,7 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
       Format.fprintf fmt
          "\"set\",@,\
          \"typeInfo\" : @,{@[<v 1>@,\
-         \"keyType\" : %a@,\
+         \"keyType\" : %a,@,\
 
          \"valueType\" : %a\
          @]@,}"
@@ -1939,7 +1939,7 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
       Format.fprintf fmt
         " \"array\",@,\
          \"typeInfo\" : @,{@[<v 1>@,\
-         \"baseType\" : %a@,\
+         \"baseType\" : %a,@,\
          \"sizes\" : [%a]@,\
          @]@,}"
         pp_print_lus_typ_json base_ty
@@ -1951,7 +1951,7 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
     Format.fprintf fmt
         " \"record\",@,\
          \"typeInfo\" : @,{@[<v 1>@,\
-         \"types\" : {%a}@,\
+         \"types\" : {%a}\
          @]@,}"
         (Lib.pp_print_list pp_print_typed_ident ", ") lst
   | EnumType (_, name, lst) ->
@@ -1972,18 +1972,19 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
   | _ ->
       assert false
 
-let pp_print_stream_string_valued_json provided_types clock ppf (name, values) =
+let pp_print_stream_string_valued_json provided_types field ppf (name, values) =
   try
     let stream_type = HString.HStringMap.find name provided_types in
     Format.fprintf ppf
       "@,{@[<v 1>@,\
         \"name\" : \"%a\",@,\
-        \"class\" : \"input\",@,\
+        \"class\" : \"%s\",@,\
         \"type\" : %a,@,\
         \"instantValues\" :@,[@[<v 1>@,%a@]@,]\
        @]@,}\
       "
       HString.pp_print_hstring name
+      field
       pp_print_lus_typ_json stream_type
       (Lib.pp_print_listi (fun fmt i value -> Format.fprintf fmt "[%d, %s]" i value) ",@,") values
 
@@ -2022,7 +2023,7 @@ let pp_print_streams_list_json (provided_inputs:(HString.t * string list) list) 
 let provided_printers =
   List.map
     (fun x ppf ->
-      pp_print_stream_string_valued_json provided_types clock ppf x)
+      pp_print_stream_string_valued_json provided_types "input" ppf x)
     provided_inputs
 in
 
@@ -2036,7 +2037,7 @@ in
 let set_map_output_printers =
   List.map
     (fun x ppf ->
-      pp_print_stream_string_valued_json provided_types clock ppf x)
+      pp_print_stream_string_valued_json provided_types "output" ppf x)
     set_map_outputs
 in
 
@@ -2056,14 +2057,19 @@ let pp_print_streams_json (provided_inputs:(HString.t * string list) list) provi
   ({N.inputs; N.outputs; N.locals} as node, model, call_conds) =
       (* Format.printf "@.@.DEBUG; TYPES@.%a @.@.@." (Lib.pp_print_list (fun ppf (str, typ) -> Format.fprintf ppf "%a : %a" HString.pp_print_hstring str LustreAst.pp_print_lustre_type typ) "@.") (HString.HStringMap.bindings provided_types); *)
 
-  let is_set_or_map sv = 
+  let has_set_or_map sv = 
     try
     let lus_ty = HString.HStringMap.find (StateVar.name_of_state_var sv |> HString.mk_hstring ) provided_types in
+        (* Format.printf "Checking if %s:%a is a map....   " (StateVar.name_of_state_var sv) LustreAst.pp_print_lustre_type lus_ty; *)
 
-    match lus_ty with
-    | LustreAst.Set _ 
-    | LustreAst.Map _ -> true
-    | _ -> false 
+    let rec has_set_or_map' lus_ty =
+      match lus_ty with
+      | LustreAst.Set _ 
+      | LustreAst.Map _ -> true
+      | LustreAst.ArrayType (_, (ty, _)) -> has_set_or_map' ty
+      | _ -> false 
+    in
+    has_set_or_map' lus_ty
     with Not_found -> false
   in
   let is_visible sv = N.state_var_is_visible node sv  in
@@ -2084,6 +2090,12 @@ let pp_print_streams_json (provided_inputs:(HString.t * string list) list) provi
     |> List.filter (fun (_, sv) -> is_visible sv)
     |> List.map pop_head_index
   in
+  let set_map_inputs = if List.is_empty provided_inputs then 
+    D.bindings inputs
+    |> List.filter (fun (_, sv) -> has_set_or_map sv)
+    |> List.map pop_head_index
+    |> List.map (fun (_, sv) -> (StateVar.name_of_state_var sv |> HString.mk_hstring, [])) else provided_inputs
+  in
 
   (* Remove index of position in output for printing *)
   let outputs' =
@@ -2093,7 +2105,7 @@ let pp_print_streams_json (provided_inputs:(HString.t * string list) list) provi
   in
   let set_map_outputs =
     D.bindings outputs
-    |> List.filter (fun (_, sv) -> is_set_or_map sv)
+    |> List.filter (fun (_, sv) -> has_set_or_map sv)
     |> List.map pop_head_index
     |> List.map (fun (_, sv) -> (StateVar.name_of_state_var sv |> HString.mk_hstring, []))
   in
@@ -2138,7 +2150,7 @@ let pp_print_streams_json (provided_inputs:(HString.t * string list) list) provi
   in
 
   Format.fprintf ppf "%a"
-    (pp_print_streams_list_json provided_inputs set_map_outputs provided_types node model clock) streams
+    (pp_print_streams_list_json set_map_inputs set_map_outputs provided_types node model clock) streams
 
 
 let pp_print_var_json_testgen ppf ((name, var_type), value) = 
