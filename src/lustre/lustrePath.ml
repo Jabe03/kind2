@@ -2050,7 +2050,7 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
         pp_print_lus_typ_json value_typ
   | Map (_,key_typ, value_typ) ->
       Format.fprintf fmt
-         "\"set\",@,\
+         "\"map\",@,\
          \"typeInfo\" : @,{@[<v 1>@,\
          \"keyType\" : %a,@,\
 
@@ -2112,10 +2112,19 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
       Format.fprintf fmt "\"real\""
   | _ ->
       assert false
+let find_type_set_or_map provided_types name =
+  try
+    HString.HStringMap.find (HString.mk_hstring name) provided_types
+  with Not_found ->
+    if String.length name > 0 && name.[String.length name - 1] = '0' then
+      raise Not_found
+    else
+      let short_name = String.sub name 0 (String.length name - 2) in
+      HString.HStringMap.find (HString.mk_hstring short_name) provided_types
 
 let pp_print_stream_string_valued_json provided_types field ppf (name, values) =
   try
-    let stream_type = HString.HStringMap.find name provided_types in
+    let stream_type = find_type_set_or_map provided_types ( HString.string_of_hstring name) in
     Format.fprintf ppf
       "@,{@[<v 1>@,\
         \"name\" : \"%a\",@,\
@@ -2216,8 +2225,7 @@ let pp_print_streams_json (provided_inputs:(HString.t * string list) list) provi
 
   let has_set_or_map sv = 
     try
-    let lus_ty = HString.HStringMap.find (StateVar.name_of_state_var sv |> HString.mk_hstring ) provided_types in
-        (* Format.printf "Checking if %s:%a is a map....   " (StateVar.name_of_state_var sv) LustreAst.pp_print_lustre_type lus_ty; *)
+    let lus_ty = find_type_set_or_map provided_types (StateVar.name_of_state_var sv) in
 
     let rec has_set_or_map' lus_ty =
       match lus_ty with
