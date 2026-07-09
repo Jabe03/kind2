@@ -2125,6 +2125,11 @@ let find_type_set_or_map provided_types name =
 let pp_print_stream_string_valued_json provided_types field ppf (name, values) =
   try
     let stream_type = find_type_set_or_map provided_types ( HString.string_of_hstring name) in
+    let name = match stream_type with
+      | LustreAst.Map (_, _, _) -> 
+        let sname = HString.string_of_hstring name in
+        String.sub sname 0 (String.length sname - 2) |> HString.mk_hstring
+      | _ -> name in
     Format.fprintf ppf
       "@,{@[<v 1>@,\
         \"name\" : \"%a\",@,\
