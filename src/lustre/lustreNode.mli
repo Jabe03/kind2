@@ -119,6 +119,11 @@ type node_call = {
 }
 
 
+(** Metadata attached to a [Generated] state variable source *)
+type gen_metadata =
+| Plain                     (** Generic generated variable, no extra metadata *)
+| Discriminant of HString.t (** Discriminant field for some ADT *)
+
 (** Source of a state variable *)
 type state_var_source =
 | Input   (** Declared input variable *)
@@ -126,7 +131,7 @@ type state_var_source =
 | Local   (** Declared local variable *)
 | Call    (** Tied to a node call. *)
 | Ghost   (** Declared ghost variable *)
-| Generated  (** Kind 2 invisible generated variable *)
+| Generated of gen_metadata (** Kind 2 invisible generated variable *)
 | Oracle  (** Generated non-deterministic input *)
 (*| Alias of
   StateVar.t * state_var_source option (** Alias for another state variable. *) *)
@@ -168,8 +173,8 @@ type type_of_component =
     side of {!t.calls}. If the state variable is of array type, there
     may be more than one occurrence of it in {!t.equations}, each
     defining the index variable at a different value with
-    {!bound_or_fixed.Fixed}. If the state variable is not an array, or
-    all its bounds are {!bound_or_fixed.Bound}, then it occurs at most
+    {!LustreExpr.bound_or_fixed.Fixed}. If the state variable is not an array, or
+    all its bounds are {!LustreExpr.bound_or_fixed.Bound}, then it occurs at most
     once on the left-hand side of {!t.equations}. *)
 type t = {
 
@@ -227,7 +232,7 @@ type t = {
   asserts : (position * StateVar.t) list;
   (** Assertions of node *)
 
-  props : (StateVar.t * string * Property.prop_source * Property.prop_kind * LustreAst.expr) list;
+  props : (StateVar.t * string * Property.prop_source * Property.prop_kind * string) list;
   (** Proof obligations for the node *)
 
   contract : contract option ;

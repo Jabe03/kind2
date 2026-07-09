@@ -58,6 +58,10 @@ let _ = run_test_tt_main ("frontend LustreAstInlineConstants error tests" >::: [
 (*                           Lustre Syntax Checks                              *)
 (* *************************************************************************** *)
 let _ = run_test_tt_main ("frontend LustreSyntaxChecks error tests" >::: [
+  mk_test "test bad underscore" (fun () ->
+    match load_file "./lustreSyntaxChecks/bad_underscore.lus" with
+    | Error (`LustreSyntaxChecksError (_, InvalidUnderscore)) -> true
+    | _ -> false);
   mk_test "test non-inlinable type ascription 1" (fun () ->
     match load_file "./lustreSyntaxChecks/non_inlinable_ta.lus" with
     | Error (`LustreSyntaxChecksError (_, QuantifiedVariableInTypeAscription _)) -> true
@@ -793,6 +797,22 @@ let _ = run_test_tt_main ("frontend LustreTypeChecker error tests" >::: [
     | _ -> false);
   mk_test "test map with unsupported array key type" (fun () ->
     match load_file "./lustreTypeChecker/map_array_key_type.lus" with
+    | Error (`LustreTypeCheckerError (_, UnsupportedMapType _)) -> true
+    | _ -> false);
+  mk_test "test set of sets is rejected" (fun () ->
+    match load_file "./lustreTypeChecker/set_of_set.lus" with
+    | Error (`LustreTypeCheckerError (_, UnsupportedMapType _)) -> true
+    | _ -> false);
+  mk_test "test set with ADT array payload is rejected" (fun () ->
+    match load_file "./lustreTypeChecker/set_adt_array_payload.lus" with
+    | Error (`LustreTypeCheckerError (_, UnsupportedMapType _)) -> true
+    | _ -> false);
+  mk_test "test set with nested ADT array payload is rejected" (fun () ->
+    match load_file "./lustreTypeChecker/set_adt_nested_array_payload.lus" with
+    | Error (`LustreTypeCheckerError (_, UnsupportedMapType _)) -> true
+    | _ -> false);
+  mk_test "test set with ADT set payload is rejected" (fun () ->
+    match load_file "./lustreTypeChecker/set_adt_set_payload.lus" with
     | Error (`LustreTypeCheckerError (_, UnsupportedMapType _)) -> true
     | _ -> false);
   mk_test "test map with illtyped access" (fun () ->

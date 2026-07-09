@@ -221,8 +221,11 @@ let rec default_value ctx adt_map pos ty =
   let ty = desugar_type pos ctx adt_map ty in
   match ty with
   | LA.Bool _ -> LA.Const (pos, LA.False)
-  | LA.Int _ | LA.SBitVector _ | LA.UBitVector _ ->
-    LA.Const (pos, LA.Num (HString.mk_hstring "0"))
+  | LA.Int _ -> LA.Const (pos, LA.Num (HString.mk_hstring "0"))
+  | LA.SBitVector (_, n) ->
+    LA.ConvOp (pos, LA.ToBV n, LA.Const (pos, LA.Num (HString.mk_hstring "0")))
+  | LA.UBitVector (_, n) ->
+    LA.ConvOp (pos, LA.ToUBV n, LA.Const (pos, LA.Num (HString.mk_hstring "0")))
   | LA.Real _ -> LA.Const (pos, LA.Dec (HString.mk_hstring "0.0"))
   | LA.EnumType (_, _, v :: _) -> LA.Ident (pos, v)
   | LA.EnumType (_, _, []) -> assert false
@@ -498,3 +501,91 @@ let desugar_adts ctx type_and_const_decls node_contract_decls =
       | _ -> acc_ctx
     ) ctx' type_and_const_decls' in
     (type_and_const_decls', node_contract_decls', ctx', adt_map)
+
+(* Rewrite a desugared expression back toward source-level ADT syntax.
+   RecordExprs whose type name is in adt_map are reconstructed as ADTTerm nodes
+   so that pp_print_expr renders them as "Ctor(arg1, arg2)" or just "Ctor".
+   This is the partial inverse of desugar_expr for the ADTTerm case. *)
+let rec rewrite_as_adt_terms adt_map expr =
+  let r e = rewrite_as_adt_terms adt_map e in
+  let rlist = List.map r in
+  let rilist = List.map (fun (i, e) -> (i, r e)) in
+  let rloi = function
+    | LA.Label _ as l -> l
+    | LA.Index (p, e) -> LA.Index (p, r e)
+    | LA.MapIndex (p, e) -> LA.MapIndex (p, r e)
+    | LA.SetIndex (p, e) -> LA.SetIndex (p, r e)
+    | LA.GenericIndex (p, e) -> LA.GenericIndex (p, r e)
+  in
+  (* Rewrite a desugared type back toward its source-level named form so that,
+     e.g., a quantifier over an ADT prints as "Message" rather than the inline
+     record definition, and an enum prints by its declared type name.  Record
+     and enum types always carry their declared type name, so a bare UserType
+     with that name renders correctly. *)
+  let rec rewrite_type ty =
+    match ty with
+    | LA.RecordType (pos, name, _) -> LA.UserType (pos, [], name)
+    | LA.EnumType (pos, name, _) -> LA.UserType (pos, [], name)
+    | LA.UserType (pos, args, name) ->
+      LA.UserType (pos, List.map rewrite_type args, name)
+    | LA.TupleType (pos, ts) -> LA.TupleType (pos, List.map rewrite_type ts)
+    | LA.GroupType (pos, ts) -> LA.GroupType (pos, List.map rewrite_type ts)
+    | LA.ArrayType (pos, (t, e)) -> LA.ArrayType (pos, (rewrite_type t, r e))
+    | LA.TArr (pos, t1, t2) -> LA.TArr (pos, rewrite_type t1, rewrite_type t2)
+    | LA.Map (pos, kt, vt) -> LA.Map (pos, rewrite_type kt, rewrite_type vt)
+    | LA.Set (pos, t) -> LA.Set (pos, rewrite_type t)
+    | LA.RefinementType (pos, (p2, id, t), e) ->
+      LA.RefinementType (pos, (p2, id, rewrite_type t), r e)
+    | LA.Bool _ | LA.Int _ | LA.Real _ | LA.SBitVector _ | LA.UBitVector _
+    | LA.AbstractType _ | LA.History _ | LA.ADT _ -> ty
+  in
+  match expr with
+  | LA.RecordExpr (pos, type_name, [], fields) when HStringMap.mem type_name adt_map ->
+    let info = HStringMap.find type_name adt_map in
+    (match List.assoc_opt info.disc_field fields with
+    | Some (LA.Ident (_, ctor_name)) ->
+      let ctor_field_names =
+        HStringMap.find_opt ctor_name info.ctor_fields
+        |> Option.value ~default:[]
+        |> List.map fst
+      in
+      let args = List.filter_map (fun fname ->
+        match List.assoc_opt fname fields with
+        | Some arg_expr -> Some (r arg_expr)
+        | None -> None
+      ) ctor_field_names in
+      LA.ADTTerm (pos, [], ctor_name, args)
+    | _ -> expr)
+  | LA.Ident _ | LA.ModeRef _ | LA.Const _ | LA.EmptyMap _ | LA.EmptySet _ | LA.Last _ -> expr
+  | LA.RecordProject (p, e, i) -> LA.RecordProject (p, r e, i)
+  | LA.UnaryOp (p, op, e) -> LA.UnaryOp (p, op, r e)
+  | LA.BinaryOp (p, op, e1, e2) -> LA.BinaryOp (p, op, r e1, r e2)
+  | LA.TernaryOp (p, op, e1, e2, e3) -> LA.TernaryOp (p, op, r e1, r e2, r e3)
+  | LA.ConvOp (p, op, e) -> LA.ConvOp (p, op, r e)
+  | LA.CompOp (p, op, e1, e2) -> LA.CompOp (p, op, r e1, r e2)
+  | LA.RecordExpr (p, n, ps, flds) -> LA.RecordExpr (p, n, ps, rilist flds)
+  | LA.GroupExpr (p, k, es) -> LA.GroupExpr (p, k, rlist es)
+  | LA.StructUpdate (p, e1, idx, e2_opt) ->
+    LA.StructUpdate (p, r e1, List.map rloi idx, Option.map r e2_opt)
+  | LA.ArrayConstr (p, e1, e2) -> LA.ArrayConstr (p, r e1, r e2)
+  | LA.IndexAccess (p, e1, e2, k) -> LA.IndexAccess (p, r e1, r e2, k)
+  | LA.When (p, e, c) -> LA.When (p, r e, c)
+  | LA.Pre (p, e) -> LA.Pre (p, r e)
+  | LA.Arrow (p, e1, e2) -> LA.Arrow (p, r e1, r e2)
+  | LA.TypeAscription (p, e, ty) -> LA.TypeAscription (p, r e, rewrite_type ty)
+  | LA.Call (p, ty_args, id, es) ->
+    LA.Call (p, List.map rewrite_type ty_args, id, rlist es)
+  | LA.Merge (p, id, flds) -> LA.Merge (p, id, rilist flds)
+  | LA.Activate (p, id, e1, e2, es) -> LA.Activate (p, id, r e1, r e2, rlist es)
+  | LA.Condact (p, e1, e2, id, es1, es2) ->
+    LA.Condact (p, r e1, r e2, id, rlist es1, rlist es2)
+  | LA.RestartEvery (p, id, es, e) -> LA.RestartEvery (p, id, rlist es, r e)
+  | LA.Quantifier (p, k, idents, e) ->
+    let idents = List.map (fun (ip, id, ty) -> (ip, id, rewrite_type ty)) idents in
+    LA.Quantifier (p, k, idents, r e)
+  | LA.Extract (p, e, ub, lb) -> LA.Extract (p, r e, ub, lb)
+  | LA.AnyOp _ | LA.ChooseOp _ -> expr
+  | LA.ADTTerm _ | LA.Match _ -> expr
+
+let string_of_expr_as_source adt_map expr =
+  LA.string_of_expr (rewrite_as_adt_terms adt_map expr)
