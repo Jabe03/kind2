@@ -2174,9 +2174,7 @@ let pp_adt_stream_json clock class_str ppf (name, step_strings) =
 
 
 
-let pp_print_streams_list_json (provided_inputs:(HString.t * string list) list) set_map_outputs provided_types node model clock adt_tagged ppf = function
-  | [] -> ()
-  | streams ->
+let pp_print_streams_list_json (provided_inputs:(HString.t * string list) list) set_map_outputs provided_types node model clock adt_tagged ppf streams = 
     let provided_printers =
       List.map
         (fun x ppf ->
