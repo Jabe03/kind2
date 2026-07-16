@@ -1174,13 +1174,18 @@ and compile_ast_expr
           | E.Unbound _ -> 
             acc
         ) E.t_true (List.combine idx_vars bounds) in
-        (* For map value equality we only consider m1[k] = m2[k] for k in the maps. 
-           `acc_guard` collects the constraints that k is in the map (if the equality is over maps) *)
-        let acc_guard' = List.fold_left (fun acc e -> 
-          let e = List.fold_left (fun acc arr_i -> 
+        (* For map value equality we only consider m1[k] = m2[k] for k in the maps.
+          "acc_guard" collects the constraints that k is in the map (if the equality is over maps).
+          "guard_arity" (and its usage) ensures that we only use indices associated
+          with the map key type and not its value type (eg, consider map<int, set<int>>). *)
+        let acc_guard' = List.fold_left (fun acc e ->
+          let guard_arity =
+            List.length (Type.all_index_types_of_array (E.type_of_lustre_expr e))
+          in
+          let e = List.fold_left (fun acc arr_i ->
             E.mk_select_and_push acc arr_i
-          ) e arr_is in
-          E.mk_and acc e 
+          ) e (fst (list_split guard_arity arr_is)) in
+          E.mk_and acc e
         ) E.t_true acc_guard in
         (* For equality:    forall (x: K) conditions =>  arr1[x]  = arr2[x] 
            For disequality: exists (x: K) conditions and arr1[x] <> arr2[x]. 
@@ -1594,7 +1599,7 @@ and compile_ast_expr
   (* ****************************************************************** *)
   (* Tuple and Record Operators                                         *)
   (* ****************************************************************** *)
-  | A.RecordProject (_, expr, field) ->
+  | A.FieldProject (_, expr, field, _) ->
     compile_projection bounds expr (field_name_to_index cstate.adt_map field)
   | A.IndexAccess (_, expr, field, A.Tuple) ->
     let field = match field with 
@@ -1650,8 +1655,9 @@ and compile_ast_expr
   | A.Activate _ -> assert false
   | A.Match _ -> assert false
   | A.ADTTerm _ -> assert false
+  | A.ADTTester _ -> assert false
 
-and compile_node_call node_scope pos ctx cstate map outputs cond restart call_ctx node_id args defaults inlined =
+and compile_node_call node_scope pos ctx cstate map outputs cond restart call_ctx node_id args defaults inlined ties =
   let ident = NI.get_internal_name node_id |> I.of_hstring in
   let called_node_oracles =
     try
@@ -1771,6 +1777,7 @@ and compile_node_call node_scope pos ctx cstate map outputs cond restart call_ct
     N.call_defaults = defaults;
     N.call_inlined = inlined;
     N.call_rec_decrease_expr = None;
+    N.call_ties = ties;
   }
   in node_call
 
@@ -2361,6 +2368,51 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
   (* Node Calls                                                         *)
   (* ****************************************************************** *)
   in
+  (* Resolve the when-block ties recorded in the gids (see
+     lustreDesugarIfBlocks.ml): a tie (tie, init_tie, t, x) is attached to the
+     call whose abstracted output defines t, i.e. the call variable cv such
+     that the generated equations contain t among the left-hand sides of an
+     equation whose right-hand side is cv. *)
+  let call_ties_by_var =
+    match gids.GI.clocked_call_ties with
+    | [] -> []
+    | ties ->
+      let call_vars =
+        List.fold_left
+          (fun acc (_, var, _, _, _, _, _, _, _) -> GI.StringSet.add var acc)
+          GI.StringSet.empty gids.GI.calls
+      in
+      let find_sv name =
+        try Some (H.find !map.state_var (mk_ident name))
+        with Not_found -> None
+      in
+      List.fold_left (fun acc (_, _, lhs, rhs, _) ->
+        match lhs, rhs with
+        | A.StructDef (_, sis), A.Ident (_, cv)
+          when GI.StringSet.mem cv call_vars ->
+          let names =
+            List.filter_map
+              (function A.SingleIdent (_, y) -> Some y | _ -> None)
+              sis
+          in
+          let resolved =
+            List.filter_map (fun (tie, init_tie, t, x) ->
+              if List.exists (HString.equal t) names then
+                match find_sv tie with
+                | Some tie_sv ->
+                  let init_tie_sv = match init_tie with
+                    | Some init_tie -> find_sv init_tie
+                    | None -> None
+                  in
+                  Some (tie_sv, init_tie_sv, x)
+                | None -> None
+              else None
+            ) ties
+          in
+          if resolved = [] then acc else (cv, resolved) :: acc
+        | _ -> acc
+      ) [] gids.GI.equations
+  in
   let (calls, glocals) =
     let seen_calls = ref SVS.empty in
     let over_calls =
@@ -2408,8 +2460,11 @@ and compile_node_decl scc_map gids_map rec_decreases_map is_function is_rec is_l
         in
         X.fold over_vars called_node_outputs X.empty
       in
+      let ties =
+        try List.assoc var call_ties_by_var with Not_found -> []
+      in
       let node_call = compile_node_call
-        node_scope pos ctx cstate map outputs cond restart call_ctx node_id args defaults inlined
+        node_scope pos ctx cstate map outputs cond restart call_ctx node_id args defaults inlined ties
       in
       (* For a (possibly mutually) recursive call, i.e. a call to a function in
          the same dependency cycle, render the source-level decrease constraint
