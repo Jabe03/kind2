@@ -86,8 +86,7 @@ val trans_sys_of_analysis:
   'a t -> Analysis.param -> TransSys.t * 'a t
 
 (** Output a path in the input system *)
-val pp_print_path_pt : ?full_contract:bool -> ?provided_inputs:(HString.t * string list) list -> ?provided_types:LustreAst.lustre_type HString.HStringMap.t
--> _ t -> TransSys.t -> bool ->  Format.formatter -> Model.path -> unit
+val pp_print_path_pt : ?full_contract:bool -> ?provided_inputs:(HString.t * string list) list -> _ t -> TransSys.t -> bool ->  Format.formatter -> Model.path -> unit
 
 (** Output a path in the input system *)
 val pp_print_path_xml : _ t -> TransSys.t -> bool -> Format.formatter -> Model.path -> unit
@@ -171,6 +170,13 @@ val prefix_system : 'a t -> string -> 'a t
 
 val types_of_vars : 'a t -> LustreAst.lustre_type HString.HStringMap.t
 
+val make_type_key : Scope.t -> HString.t -> string
+
+val lookup_type :
+  LustreAst.lustre_type HString.HStringMap.t ->
+  Scope.t ->
+  HString.t ->
+  LustreAst.lustre_type option
 
 (* 
    Local Variables:

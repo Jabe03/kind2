@@ -57,6 +57,29 @@ let rec assert_trans solver t i =
       assert_trans solver t Numeral.(i - one)
 
     )
+
+let rec contains_set_or_map typ =
+  match typ with
+  | LustreAst.Set _
+  | LustreAst.Map _ ->
+      true
+
+  | LustreAst.ArrayType (_, (element_type, _)) ->
+      contains_set_or_map element_type
+
+  | LustreAst.TupleType (_, types) ->
+      List.exists contains_set_or_map types
+
+  | LustreAst.RecordType (_, _, fields) ->
+      List.exists
+        (fun (_, _, field_type) -> contains_set_or_map field_type)
+        fields
+
+  | LustreAst.RefinementType (_, (_, _, typ), _) ->
+      contains_set_or_map typ
+
+  | _ ->
+      false
     
 
 (* Main entry point *)
@@ -78,7 +101,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
         (Flags.input_file ()); 
 
   (* Read inputs from file *)
-  let (inputs, (inputs_str: (HString.t * string list) list)) =
+  let (inputs, inputs_str) =
     if input_file = "" then ([], [])
     else
       try InputParser.read_file  ~only_inputs:(not contract_monitor) input_scope input_file vars_types
@@ -87,10 +110,6 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
         KEvent.log L_warn "@[<v>Error reading interpreter input file.@,%s@]" e;
         raise (Failure "main")
   in
-
-  (* Format.printf "DEBUG: Inputs read as strings: @.%a@." (Lib.pp_print_list (fun ppf (name, values) -> (
-    Format.fprintf ppf "[@.%a@.]" (Lib.pp_print_list (fun ppf value -> Format.fprintf ppf "%a     %s" HString.pp_print_hstring name value) "@.") (values)
-  )) "@.") (inputs_str); *)
 
   let nb_inputs = List.filter StateVar.is_input trans_svars |> List.length in
 
@@ -170,7 +189,26 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
   KEvent.log L_info "Interpreter running up to k=%d" steps;
 
   (* Determine logic for the SMT solver *)
-  let logic = TransSys.get_logic trans_sys in
+
+  let inputs_contain_sets_or_maps =
+    List.exists
+      (fun (((sv, _indexes), _values)) ->
+        let name =
+          StateVar.name_of_state_var sv
+          |> HString.mk_hstring
+        in
+        match InputSystem.lookup_type vars_types (StateVar.scope_of_state_var sv) name with
+        | Some typ -> contains_set_or_map typ
+        | None -> false)
+      inputs
+  in
+
+  let logic =
+    if inputs_contain_sets_or_maps then
+      TermLib.add_quantifiers (TransSys.get_logic trans_sys)
+    else
+      TransSys.get_logic trans_sys
+  in
 
   (* Create solver instance *)
   let solver = 
@@ -234,7 +272,7 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
                    idxs_seen := (i, idx_ty) :: !idxs_seen; 
                 Term.mk_select acc (i)
               ) var indexes |> Term.convert_select in
-              if List.exists (fun (i, ty) -> ty = InputParser.SetMapPresenceIndex) !idxs_seen 
+              if List.exists (fun (_, ty) -> ty = InputParser.SetMapPresenceIndex) !idxs_seen 
                 then add_defined_index instant state_var (List.map fst !idxs_seen);
               (* Constrain variable to its value at instant *)
               let equation = 

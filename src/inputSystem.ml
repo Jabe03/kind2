@@ -530,7 +530,7 @@ let trans_sys_of_analysis (type s)
 
 
 let pp_print_path_pt
-(type s) ?(full_contract = false) ?(provided_inputs = []) ?(provided_types = HString.HStringMap.empty) (input_system : s t) trans_sys first_is_init ppf model =
+(type s) ?(full_contract = false) ?(provided_inputs = []) (input_system : s t) trans_sys first_is_init ppf model =
   match input_system with 
 
   | Lustre (main_subs, globals, _, _) ->
@@ -1175,6 +1175,32 @@ let prefix_system (type s) (input_system : s t) prefix : s t = match input_syste
   | _ -> input_system
 
 
+let make_type_key scope name =
+  let scope_str = String.concat "." scope in
+  let name_str = HString.string_of_hstring name in
+  if scope_str = "" then name_str else scope_str ^ "." ^ name_str
+
+let lookup_type types scope name =
+  let candidate_scopes scope =
+    let rec aux acc current_scope =
+      match current_scope with
+      | [] -> List.rev acc
+      | _ ->
+        let shorter_scope = List.rev (List.tl (List.rev current_scope)) in
+        aux (current_scope :: acc) shorter_scope
+    in
+    aux [] scope
+  in
+  let rec aux = function
+    | [] -> HString.HStringMap.find_opt name types
+    | current_scope :: remaining_scopes ->
+      let scoped_key = HString.mk_hstring (make_type_key current_scope name) in
+      match HString.HStringMap.find_opt scoped_key types with
+      | Some ty -> Some ty
+      | None -> aux remaining_scopes
+  in
+  aux (candidate_scopes scope)
+
 let monitor_param (type s) (input_system : s t) =
   let scope, abstraction_map =
     match input_system with
@@ -1227,9 +1253,15 @@ let types_of_vars (type s) (input_system : s t) =
   | Lustre (_, _, _, ctx) ->
     List.fold_left (fun acc decl ->
       match decl with
-      | LustreAst.NodeDecl (_, (_, _, _, _, inputs, outputs, locals, _, _))
-      | LustreAst.FuncDecl (_, (_, _, _, _, inputs, outputs, locals, _, _), _) ->
-          
+      | LustreAst.NodeDecl (_, (node_id, _, _, _, inputs, outputs, locals, _, _))
+      | LustreAst.FuncDecl (_, (node_id, _, _, _, inputs, outputs, locals, _, _), _) ->
+          let scope =
+            node_id
+            |> NodeId.get_internal_name
+            |> LustreIdent.of_hstring
+            |> LustreIdent.to_scope
+          in
+
           let input_pairs =
             List.map LustreAstHelpers.extract_ip_ty inputs
           in
@@ -1241,11 +1273,12 @@ let types_of_vars (type s) (input_system : s t) =
           in
 
           let acc =
-            List.fold_left (fun acc (vname, vtype) -> 
-              HString.HStringMap.add vname (TypeCheckerContext.expand_type_syn ctx vtype) acc
+            List.fold_left (fun acc (vname, vtype) ->
+              let scoped_name = make_type_key scope vname in
+              HString.HStringMap.add (HString.mk_hstring scoped_name) (TypeCheckerContext.expand_type_syn ctx vtype) acc
               ) acc (input_pairs @ output_pairs @ local_pairs)
           in
-          acc 
+          acc
       | _ -> acc
     ) HString.HStringMap.empty (lustre_source_ast input_system)
   | Moxi _ -> raise (UnsupportedFileFormat "MoXI")

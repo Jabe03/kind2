@@ -512,21 +512,21 @@ let pp_print_trace_pt ?(title="Counterexample") ?(color="red")
 
 
 (* Output execution path without slicing *)
-let pp_print_path_pt ?(full_contract = false) input_sys trans_sys provided_inputs provided_types ppf path = 
+let pp_print_path_pt ?(full_contract = false) input_sys trans_sys provided_inputs ppf path = 
   (* Output path *)
   Format.fprintf ppf 
     "%a"
-    (InputSystem.pp_print_path_pt ~full_contract ~provided_inputs ~provided_types input_sys trans_sys true )
+    (InputSystem.pp_print_path_pt ~full_contract ~provided_inputs input_sys trans_sys true )
     (Model.path_of_list path)
 
 
 (* Output execution path as plain text *)
-let execution_path_pt level input_sys trans_sys path full_contract provided_inputs provided_types= 
+let execution_path_pt level input_sys trans_sys path full_contract provided_inputs= 
   (ignore_or_fprintf level)
     !log_ppf 
     ("@[<v>@{<b>Execution@}:@,\
       %a@]@.")
-    (pp_print_path_pt ~full_contract input_sys trans_sys provided_inputs provided_types) path
+    (pp_print_path_pt ~full_contract input_sys trans_sys provided_inputs) path
 
 
 (* Output cex for a property as plain text *)
@@ -1593,7 +1593,7 @@ let log_step_cex mdl level input_sys analysis trans_sys prop cex =
 let log_execution_path level input_sys full_contract provided_inputs provided_types trans_sys path =
 
   (match get_log_format () with 
-    | F_pt -> execution_path_pt level input_sys trans_sys path full_contract provided_inputs provided_types
+    | F_pt -> execution_path_pt level input_sys trans_sys path full_contract provided_inputs
     | F_xml -> execution_path_xml level input_sys trans_sys path
     | F_json -> execution_path_json level input_sys trans_sys path provided_inputs provided_types
     | F_relay -> ())

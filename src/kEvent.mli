@@ -273,7 +273,7 @@ val pp_print_user_node_name: 'a InputSystem.t -> Format.formatter -> Scope.t -> 
 
 val pp_print_path_pt :
   ?full_contract:bool -> 'a InputSystem.t -> 
-  TransSys.t -> (HString.t * string list) list -> LustreAst.lustre_type HString.HStringMap.t -> 
+  TransSys.t -> (HString.t * string list) list -> 
   Format.formatter -> (StateVar.t * Model.value list) list -> unit
 
 (* 

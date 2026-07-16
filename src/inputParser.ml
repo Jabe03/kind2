@@ -449,8 +449,11 @@ let rec read_term ?(only_inputs = true) scope name indexes (arr_indexes : (Term.
 *)
 
 let read_val ?(only_inputs = true) scope name indexes (arr_indexes : (Term.t*index_type) list) json sv_name_type_map =
-    let expected_type : lustre_type = sv_name_type_map |> HString.HStringMap.find (HString.mk_hstring name)
-  in
+    let expected_type : lustre_type =
+      match InputSystem.lookup_type sv_name_type_map scope (HString.mk_hstring name) with
+      | Some typ -> typ
+      | None -> raise (Not_found)
+    in
   read_term ~only_inputs:only_inputs scope name indexes arr_indexes json expected_type |> 
     List.map (fun ((svar_info, arr_indexes), term) -> 
       (* Need to also implement the state-var-level checks that are commented above 
@@ -597,8 +600,9 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
     |> List.fold_left
         (fun acc (name, json) ->
             let expected_type : lustre_type =
-              sv_name_type_map
-              |> HString.HStringMap.find (HString.mk_hstring name)
+              match InputSystem.lookup_type sv_name_type_map top_scope_index (HString.mk_hstring name) with
+              | Some typ -> typ
+              | None -> raise Not_found
             in
             match expected_type with 
             | LustreAst.Map _
@@ -613,7 +617,7 @@ let read_vars ?(only_inputs=true) scope sv_name_type_map json  =
 
 
 let invert_instant_dim (input: string list HString.HStringMap.t list) : (string list) HString.HStringMap.t = 
-  List.fold_left (fun acc value -> HSM.union (fun k l r -> Some (List.append l r)  ) acc value ) HSM.empty input
+  List.fold_left (fun acc value -> HSM.union (fun _ l r -> Some (List.append l r)  ) acc value ) HSM.empty input
   
     (* Parse a JSON input file *)
 let read_json_file ?(only_inputs=true) top_scope_index filename sv_name_type_map =

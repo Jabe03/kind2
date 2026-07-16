@@ -819,7 +819,7 @@ let pp_print_lustre_var ppf state_var =
 
 
 (* Output the identifier of an indexed stream *)
-let pp_print_stream_ident_pt ppf (index, state_var) =
+let pp_print_stream_ident_pt ppf (_, state_var) =
 
   Format.fprintf
     ppf
@@ -2085,7 +2085,7 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
          @]@,}"
         pp_print_lus_typ_json base_ty
         (Lib.pp_print_list pp_print_expr ", ") sizes
-  | RecordType (_, (idx: HString.t), lst) -> 
+  | RecordType (_, _, lst) -> 
     let pp_print_typed_ident fmt (_, ident, ty) = 
       Format.fprintf fmt "\"%a\" : {\"type\" : %a}" HString.pp_print_hstring ident pp_print_lus_typ_json ty
     in
@@ -2112,19 +2112,50 @@ let rec pp_print_lus_typ_json fmt (lus_typ : LustreAst.lustre_type) =
       Format.fprintf fmt "\"real\""
   | _ ->
       assert false
-let find_type_set_or_map provided_types name =
-  try
-    HString.HStringMap.find (HString.mk_hstring name) provided_types
-  with Not_found ->
+let make_type_key scope name =
+  let scope_str = String.concat "." scope in
+  let name_str = HString.string_of_hstring name in
+  if scope_str = "" then name_str else scope_str ^ "." ^ name_str
+
+let lookup_type types scope name =
+  (* Sometimes the scope can be different depending on the context we are looking it up in.
+  This is a simple approach to handle such cases. It looks for full scope first, then tries 
+  again by tearing up the scope, starting from the most specific scope *)
+  let candidate_scopes scope =
+    let rec aux acc current_scope =
+      match current_scope with
+      | [] -> List.rev acc
+      | _ ->
+        let shorter_scope = List.rev (List.tl (List.rev current_scope)) in
+        aux (current_scope :: acc) shorter_scope
+    in
+    aux [] scope
+  in
+  let rec aux = function
+    | [] -> HString.HStringMap.find_opt name types
+    | current_scope :: remaining_scopes ->
+      let scoped_key = HString.mk_hstring (make_type_key current_scope name) in
+      match HString.HStringMap.find_opt scoped_key types with
+      | Some ty -> Some ty
+      | None -> aux remaining_scopes
+  in
+  aux (candidate_scopes scope)
+
+let find_type_set_or_map provided_types scope name =
+  match lookup_type provided_types scope (HString.mk_hstring name) with
+  | Some typ -> typ
+  | None ->
     if String.length name > 0 && name.[String.length name - 1] = '0' then
       raise Not_found
     else
       let short_name = String.sub name 0 (String.length name - 2) in
-      HString.HStringMap.find (HString.mk_hstring short_name) provided_types
+      (match lookup_type provided_types scope (HString.mk_hstring short_name) with
+       | Some typ -> typ
+       | None -> raise Not_found)
 
-let pp_print_stream_string_valued_json provided_types field ppf (name, values) =
+let pp_print_stream_string_valued_json provided_types scope field ppf (name, values) =
   try
-    let stream_type = find_type_set_or_map provided_types ( HString.string_of_hstring name) in
+    let stream_type = find_type_set_or_map provided_types scope (HString.string_of_hstring name) in
     let name = match stream_type with
       | LustreAst.Map (_, _, _) -> 
         let sname = HString.string_of_hstring name in
@@ -2189,10 +2220,11 @@ let pp_adt_stream_json clock class_str ppf (name, step_strings) =
 
 
 let pp_print_streams_list_json (provided_inputs:(HString.t * string list) list) set_map_outputs provided_types node model clock adt_tagged ppf streams = 
+    let scope = LustreNode.scope_of_node node in
     let provided_printers =
       List.map
         (fun x ppf ->
-          pp_print_stream_string_valued_json provided_types "input" ppf x)
+          pp_print_stream_string_valued_json provided_types scope "input" ppf x)
         provided_inputs
     in
 
@@ -2206,7 +2238,7 @@ let pp_print_streams_list_json (provided_inputs:(HString.t * string list) list) 
     let set_map_output_printers =
       List.map
         (fun x ppf ->
-          pp_print_stream_string_valued_json provided_types "output" ppf x)
+          pp_print_stream_string_valued_json provided_types scope "output" ppf x)
         set_map_outputs
     in
     let adt_tagged_printers = List.map (fun (class_str, adt_s) ppf -> pp_adt_stream_json clock class_str ppf adt_s) adt_tagged in
@@ -2230,7 +2262,7 @@ let pp_print_streams_json (provided_inputs:(HString.t * string list) list) provi
 
   let has_set_or_map sv = 
     try
-    let lus_ty = find_type_set_or_map provided_types (StateVar.name_of_state_var sv) in
+    let lus_ty = find_type_set_or_map provided_types (StateVar.scope_of_state_var sv) (StateVar.name_of_state_var sv) in
 
     let rec has_set_or_map' lus_ty =
       match lus_ty with
