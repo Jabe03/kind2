@@ -2569,9 +2569,13 @@ module Interpreter = struct
 
   let steps_default = 0
   let steps = ref steps_default
+  let steps_was_set = ref false
+  let set_steps n =
+    steps := n;
+    steps_was_set := true
   let _ = add_spec
     "--interpreter_steps"
-    (Arg.Set_int steps)
+    (Arg.Int set_steps)
     (fun fmt ->
       Format.fprintf fmt
         "@[<v>\
@@ -2582,6 +2586,7 @@ module Interpreter = struct
         steps_default
     )
   let steps () = !steps
+  let steps_was_set () = !steps_was_set
 
 end
 

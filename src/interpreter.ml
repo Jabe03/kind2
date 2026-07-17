@@ -138,7 +138,13 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
     match (if contract_monitor then Flags.ContractMonitor.steps else Flags.Interpreter.steps) () with 
 
     (* Simulate length of smallest input if number of steps not given *)
-    | s when s <= 0 -> input_length
+    | s when s <= 0 -> if (not (Flags.Interpreter.steps_was_set ())) && nb_inputs == 0 
+      then (
+            KEvent.log L_warn 
+           "The --interpreter_steps <int> option is required when simulating nodes with no inputs";           
+            Failure "main" |> raise
+      )
+      else input_length
 
     (* Length of simulation given by user *)
     | s -> 

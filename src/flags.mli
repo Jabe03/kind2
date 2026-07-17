@@ -765,6 +765,9 @@ module Interpreter : sig
   (** Run number of steps, override the number of steps given in the input
     file. *)
   val steps : unit -> int
+
+  (** Whether --interpreter_steps was explicitly passed on the command line. *)
+  val steps_was_set : unit -> bool
 end
 
 (** {2 ContractMonitor flags} *)
