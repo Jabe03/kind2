@@ -118,6 +118,13 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
       inputs
   in
 
+  if (not (Flags.Interpreter.steps_was_set ())) && input_length == 0 
+  then (
+        KEvent.log L_warn 
+        "The --interpreter_steps <int> option is required when simulating nodes with no given inputs";           
+        Failure "main" |> raise
+  );
+
   (* Check if all inputs are of the same length *)
   List.iter
     (fun ((state_var, _), inputs) -> 
@@ -132,19 +139,14 @@ let main ?(contract_monitor=false) input_file input_sys _ trans_sys =
 
     inputs;
 
+ 
   (* Number of steps to simulate *)
   let steps = 
     
     match (if contract_monitor then Flags.ContractMonitor.steps else Flags.Interpreter.steps) () with 
 
     (* Simulate length of smallest input if number of steps not given *)
-    | s when s <= 0 -> if (not (Flags.Interpreter.steps_was_set ())) && nb_inputs == 0 
-      then (
-            KEvent.log L_warn 
-           "The --interpreter_steps <int> option is required when simulating nodes with no inputs";           
-            Failure "main" |> raise
-      )
-      else input_length
+    | s when s <= 0 ->  input_length
 
     (* Length of simulation given by user *)
     | s -> 
