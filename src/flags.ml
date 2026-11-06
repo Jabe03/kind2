@@ -2641,6 +2641,202 @@ module C2I = struct
 end
 
 
+(* LLM invariant generation flags. *)
+module Llm = struct
+
+  include Make_Spec (struct end)
+
+  (* Identifier of the module. *)
+  let id = "llm"
+  (* Short description of the module. *)
+  let desc = "LLM invariant generation flags"
+  (* Explanation of the module. *)
+  let fmt_explain fmt =
+    Format.fprintf fmt "@[<v>\
+      LLMINV asks a local large language model, served by Ollama, for@ \
+      candidate invariants. The engine is experimental and inactive by@ \
+      default; enable it with --enable LLMINV.@ \
+      In its current state it only records the prompts it sends and the@ \
+      answers it gets, and does not use them.\
+    @]"
+
+  let endpoint_default = "http://127.0.0.1:11434"
+  let endpoint = ref endpoint_default
+  let _ = add_spec
+    "--llm_endpoint"
+    (Arg.Set_string endpoint)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Base URL of the Ollama server (plain http only)@ \
+          Default: %s\
+        @]"
+        endpoint_default
+    )
+  let endpoint () = !endpoint
+
+  let model_default = "qwen3.5"
+  let model = ref model_default
+  let _ = add_spec
+    "--llm_model"
+    (Arg.Set_string model)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Name of the model to query@ \
+          Default: %s\
+        @]"
+        model_default
+    )
+  let model () = !model
+
+  let timeout_default = 300.0
+  let timeout = ref timeout_default
+  let _ = add_spec
+    "--llm_timeout"
+    (Arg.Set_float timeout)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Maximal wall-clock time of one request in seconds@ \
+          Default: %.0f\
+        @]"
+        timeout_default
+    )
+  let timeout () = !timeout
+
+  let num_ctx_default = 32768
+  let num_ctx = ref num_ctx_default
+  let _ = add_spec
+    "--llm_num_ctx"
+    (Arg.Set_int num_ctx)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Context window requested from the server, in tokens. Ollama@ \
+          silently drops the start of prompts longer than this.@ \
+          Default: %d\
+        @]"
+        num_ctx_default
+    )
+  let num_ctx () = !num_ctx
+
+  let max_tokens_default = 8192
+  let max_tokens = ref max_tokens_default
+  let _ = add_spec
+    "--llm_max_tokens"
+    (Arg.Set_int max_tokens)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Maximal number of tokens the model generates for one request,@ \
+          reasoning included.@ \
+          Default: %d\
+        @]"
+        max_tokens_default
+    )
+  let max_tokens () = !max_tokens
+
+  let think_default = "auto"
+  let think = ref think_default
+  let _ = add_spec
+    "--llm_think"
+    (Arg.String (fun s ->
+      match s with
+      | "auto" | "true" | "false" -> think := s
+      | _ -> raise (Arg.Bad (
+        Format.sprintf "Unexpected value '%s' for flag --llm_think" s))))
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Whether to ask a reasoning model to think before answering:@ \
+          auto, true or false. With auto, the model's default is used.@ \
+          Default: %s\
+        @]"
+        think_default
+    )
+  let think () =
+    match !think with "true" -> Some true | "false" -> Some false | _ -> None
+
+  let log_dir_default = "kind2-llm-log"
+  let log_dir = ref log_dir_default
+  let _ = add_spec
+    "--llm_log_dir"
+    (Arg.Set_string log_dir)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Directory where each prompt and answer is written@ \
+          Default: %s\
+        @]"
+        log_dir_default
+    )
+  let log_dir () = !log_dir
+
+  let print_default = "none"
+  let print = ref print_default
+  let _ = add_spec
+    "--llm_print"
+    (Arg.String (fun s ->
+      match s with
+      | "none" | "answer" | "all" -> print := s
+      | _ -> raise (Arg.Bad (
+        Format.sprintf "Unexpected value '%s' for flag --llm_print" s))))
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Print each exchange on the standard error: none, answer (the@ \
+          answer of the model) or all (also the prompts and the thinking).@ \
+          This is the only way to watch the engine in kmoxi, which keeps@ \
+          its log off.@ \
+          Default: %s\
+        @]"
+        print_default
+    )
+  let print () =
+    match !print with "answer" -> `Answer | "all" -> `All | _ -> `None
+
+  let print_ts_default = "none"
+  let print_ts = ref print_ts_default
+  let _ = add_spec
+    "--llm_print_ts"
+    (Arg.String (fun s ->
+      match s with
+      | "none" | "normal" | "raw" -> print_ts := s
+      | _ -> raise (Arg.Bad (
+        Format.sprintf "Unexpected value '%s' for flag --llm_print_ts" s))))
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Print the transition system on the standard error before asking@ \
+          the model: none, normal (as the model is told of it, for each@ \
+          property) or raw (as Kind 2 represents it, with its subsystems).@ \
+          Default: %s\
+        @]"
+        print_ts_default
+    )
+  let print_ts () =
+    match !print_ts with "normal" -> `Normal | "raw" -> `Raw | _ -> `None
+
+  let check_ts_default = false
+  let check_ts = ref check_ts_default
+  let _ = add_spec
+    "--llm_check_ts"
+    (bool_arg check_ts)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Have the SMT solver check that what the model is told of the@ \
+          transition system is equivalent to it, and report the result on@ \
+          the standard error. Needs a solver supporting quantifiers.@ \
+          Default: %a\
+        @]"
+        fmt_bool check_ts_default
+    )
+  let check_ts () = !check_ts
+end
+
+
 (* Interpreter flags. *)
 module Interpreter = struct
 
@@ -2807,6 +3003,9 @@ let module_map = [
   (C2I.id,
     (module C2I: FlagModule)
   ) ;
+  (Llm.id,
+    (module Llm: FlagModule)
+  ) ;
   (Testgen.id,
     (module Testgen: FlagModule)
   ) ;
@@ -2896,7 +3095,7 @@ let kmoxi_profile = {
      given" ;
   kind2_only_flags = false ;
   modules = [
-    Smt.id ; BmcKind.id ; IC3QE.id ; IC3IA.id ; Invgen.id ; C2I.id ; QE.id ;
+    Smt.id ; BmcKind.id ; IC3QE.id ; IC3IA.id ; Invgen.id ; C2I.id ; Llm.id ; QE.id ;
     Arrays.id ; Quant.id
   ] ;
   solvers_after_input = true ;
@@ -3477,6 +3676,7 @@ module Global = struct
     | "INVGENREAL" -> `INVGENREAL
     | "INVGENREALOS" -> `INVGENREALOS
     | "C2I" -> `C2I
+    | "LLMINV" -> `LLMINV
     | "interpreter" -> `Interpreter
     | "contract_monitor" -> `CMonitor
     | "MCS" -> `MCS
@@ -3502,6 +3702,7 @@ module Global = struct
     | `INVGENREAL -> "INVGENREAL"
     | `INVGENREALOS -> "INVGENREALOS"
     | `C2I -> "C2I"
+    | `LLMINV -> "LLMINV"
     | `Interpreter -> "interpreter"
     | `CMonitor -> "contract_monitor"
     | `MCS -> "MCS"
@@ -3520,7 +3721,7 @@ module Global = struct
     `INVGENINT ; `INVGENINTOS ;
     `INVGENMACH ; `INVGENMACHOS ;
     `INVGENREAL ; `INVGENREALOS ;
-    `C2I ; `Interpreter ; `CMonitor ; `MCS ; `CONTRACTCK
+    `C2I ; `LLMINV ; `Interpreter ; `CMonitor ; `MCS ; `CONTRACTCK
   ] |> List.map string_of_kind_module
 
   let enable_default_init = []

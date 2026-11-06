@@ -122,6 +122,7 @@ let main_of_process = function
     | `INVGENREAL -> InvGen.main_real true
     | `INVGENREALOS -> InvGen.main_real false
     | `C2I -> C2I.main
+    | `LLMINV -> LlmInv.main
     | `Interpreter -> Flags.Interpreter.input_file () |> Interpreter.main
     | `CMonitor ->  Flags.ContractMonitor.input_file () |> Interpreter.main ~contract_monitor:true
     | `Supervisor -> assert false
@@ -153,6 +154,7 @@ let on_exit_of_process mdl =
     | `INVGENREAL -> InvGen.exit None
     | `INVGENREALOS -> InvGen.exit None
     | `C2I -> C2I.on_exit None
+    | `LLMINV -> LlmInv.on_exit None
     | `Interpreter -> Interpreter.on_exit None
     | `CMonitor -> Interpreter.on_exit None
     | `Supervisor -> InvarManager.on_exit None

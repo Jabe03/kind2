@@ -974,6 +974,7 @@ type kind_module =
   | `INVGENREAL
   | `INVGENREALOS
   | `C2I
+  | `LLMINV
   | `Interpreter
   | `CMonitor
   | `Supervisor
@@ -1005,6 +1006,7 @@ let pp_print_kind_module ppf = function
   | `INVGENREAL -> fprintf ppf "two state invariant generator (real)"
   | `INVGENREALOS -> fprintf ppf "one state invariant generator (real)"
   | `C2I -> fprintf ppf "c2i"
+  | `LLMINV -> fprintf ppf "LLM invariant generator"
   | `Interpreter -> fprintf ppf "interpreter"
   | `CMonitor -> fprintf ppf "contract monitor"
   | `Supervisor -> fprintf ppf "invariant manager"
@@ -1039,6 +1041,7 @@ let short_name_of_kind_module = function
  | `INVGENREAL -> "invgenintts"
  | `INVGENREALOS -> "invgenintos"
  | `C2I -> "c2i"
+ | `LLMINV -> "llminv"
  | `Interpreter -> "interp"
  | `CMonitor -> "cmonitor"
  | `Supervisor -> "super"
@@ -1085,6 +1088,7 @@ let kind_module_of_string = function
   | "INVGENREAL" -> `INVGENREAL
   | "INVGENREALOS" -> `INVGENREALOS
   | "C2I" -> `C2I
+  | "LLMINV" -> `LLMINV
   | s -> 
     match parse_invgen_module s with 
     | Some m -> m 
@@ -1111,6 +1115,7 @@ let int_of_kind_module = function
   | `INVGENREAL -> 9
   | `INVGENREALOS -> 10
   | `C2I -> 11
+  | `LLMINV -> 12
   | `INVGENMACH -> 28
   | `INVGENMACHOS -> 29
   | `IC3IA -> 31

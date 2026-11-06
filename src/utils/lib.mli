@@ -427,6 +427,7 @@ type kind_module =
   | `INVGENREAL
   | `INVGENREALOS
   | `C2I
+  | `LLMINV
   | `Interpreter
   | `CMonitor
   | `Supervisor

@@ -824,6 +824,43 @@ module C2I : sig
 end
 
 
+(** {2 LLM invariant generation flags} *)
+module Llm : sig
+
+  (** Base URL of the Ollama server. *)
+  val endpoint : unit -> string
+
+  (** Name of the model to query. *)
+  val model : unit -> string
+
+  (** Maximal wall-clock time of one request, in seconds. *)
+  val timeout : unit -> float
+
+  (** Context window requested from the server, in tokens. *)
+  val num_ctx : unit -> int
+
+  (** Maximal number of tokens generated for one request. *)
+  val max_tokens : unit -> int
+
+  (** Whether to ask a reasoning model to think; [None] for the model's
+      default. *)
+  val think : unit -> bool option
+
+  (** Directory where prompts and answers are written. *)
+  val log_dir : unit -> string
+
+  (** What of each exchange to print on the standard error. *)
+  val print : unit -> [ `None | `Answer | `All ]
+
+  (** Which form of the transition system to print on the standard error. *)
+  val print_ts : unit -> [ `None | `Normal | `Raw ]
+
+  (** Whether to check that the form the model is told of is equivalent to
+      the transition system. *)
+  val check_ts : unit -> bool
+end
+
+
 (** {2 Interpreter flags} *)
 module Interpreter : sig
 
