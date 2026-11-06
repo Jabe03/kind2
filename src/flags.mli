@@ -858,6 +858,9 @@ module Llm : sig
   (** Whether to check that the form the model is told of is equivalent to
       the transition system. *)
   val check_ts : unit -> bool
+
+  (** Recorded Ollama response body to use instead of contacting the server. *)
+  val replay : unit -> string option
 end
 
 

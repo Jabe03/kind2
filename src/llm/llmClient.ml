@@ -211,6 +211,10 @@ let parse_body ~wall_seconds ~timed_out body =
     server_seconds ; wall_seconds ; raw = body ;
   }
 
+let replay path =
+  let body = In_channel.with_open_bin path In_channel.input_all in
+  parse_body ~wall_seconds:0.0 ~timed_out:false body
+
 (* Send one chat request and wait for the answer. A timeout gives what the
    model produced so far. Raises [Error] on any other failure; exceptions
    raised by [poll] (termination) go through, and in every case the socket

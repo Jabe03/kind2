@@ -2655,9 +2655,9 @@ module Llm = struct
     Format.fprintf fmt "@[<v>\
       LLMINV asks a local large language model, served by Ollama, for@ \
       candidate invariants. The engine is experimental and inactive by@ \
-      default; enable it with --enable LLMINV.@ \
-      In its current state it only records the prompts it sends and the@ \
-      answers it gets, and does not use them.\
+      default; enable it with --enable LLMINV. Candidate terms are parsed,@ \
+      checked with SMT and only sound invariants are shared. Use@ \
+      --llm_replay to test a recorded response without a server.\
     @]"
 
   let endpoint_default = "http://127.0.0.1:11434"
@@ -2834,6 +2834,16 @@ module Llm = struct
         fmt_bool check_ts_default
     )
   let check_ts () = !check_ts
+
+  let replay_file = ref None
+  let _ = add_spec
+    "--llm_replay"
+    (Arg.String (fun path -> replay_file := Some path))
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>Read one recorded Ollama response JSON instead of contacting the server@]"
+    )
+  let replay () = !replay_file
 end
 
 

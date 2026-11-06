@@ -18,10 +18,9 @@
 
 (* LLM-based invariant generation engine (LLMINV).
 
-   Skeleton: for each property that is still unknown, ask the model for
-   candidate invariants and record the prompt and the answer in
-   [Flags.Llm.log_dir], without using the answer. Parsing, checking and
-   broadcasting candidates come later (AI_INVGEN_PLAN.md, Phase 3).
+  For each property that is still unknown, ask the model for candidate
+  invariants, record the exchange, then parse, check and broadcast only
+  sound candidates. Multi-round feedback remains future work.
 
    All the state of the engine is local to [main]: an engine abandoned
    at the end of an analysis may still be running when the next
@@ -29,6 +28,7 @@
 
 module Client = LlmClient
 module Prompt = LlmPrompt
+module Lsd = LockStepDriver
 
 let on_exit _ = ()
 
@@ -155,6 +155,97 @@ let print_exchange ~name ~(prompt : Prompt.t) ~path result =
     in
     eprint "\n===== LLMINV: %s =====\n%s%s%s\n" name prompts body record
 
+let check_candidates in_sys sys prop rendered answer =
+  let parsed = LlmCandidate.parse rendered sys answer in
+  List.iter (fun (text, reason) ->
+    KEvent.log L_debug "LLMINV: rejected candidate %S: %s" text reason
+  ) parsed.rejected ;
+  KEvent.log L_note "LLMINV: parsed %d candidates, rejected %d"
+    (List.length parsed.terms) (List.length parsed.rejected) ;
+  match parsed.terms with
+  | [] -> ()
+  | candidates ->
+    let base_holds term =
+      let base = Lsd.mk_base_checker in_sys sys Numeral.zero in
+      Fun.protect
+        ~finally:(fun () -> Lsd.kill_base base)
+        (fun () -> Lsd.query_base in_sys base [term] = None)
+    in
+    let base_candidates =
+      List.filter (fun term ->
+        try base_holds term with error ->
+          KEvent.log L_debug "LLMINV: base check rejected candidate: %s"
+            (Printexc.to_string error) ;
+          false
+      ) candidates
+    in
+    if base_candidates = [] then (
+      KEvent.log L_note "LLMINV: no candidate holds in every initial state"
+    ) else (
+      let prop_term = prop.Property.prop_term in
+      let prop_base =
+        try base_holds prop_term with error ->
+          KEvent.log L_warn "LLMINV: cannot check initial property: %s"
+            (Printexc.to_string error) ;
+          false
+      in
+      let candidates =
+        if prop_base then base_candidates @ [prop_term] else base_candidates
+      in
+      let base = Lsd.mk_base_checker in_sys sys Numeral.zero in
+      let step =
+        try Lsd.to_step base with error ->
+          Lsd.kill_base base ;
+          raise error
+      in
+      Fun.protect
+        ~finally:(fun () -> Lsd.kill_step step)
+        (fun () ->
+          let survivors =
+            Lsd.query_step false in_sys step
+              (List.map (fun term -> term, ()) candidates)
+            |> List.map fst
+          in
+          let property_survives =
+            prop_base && List.exists (Term.equal prop_term) survivors
+          in
+          let invariant_terms =
+            if property_survives then survivors
+            else List.filter (fun term -> not (Term.equal term prop_term)) survivors
+          in
+          match invariant_terms with
+          | [] -> KEvent.log L_note "LLMINV: no inductive candidate survived"
+          | terms ->
+            let invariant = Term.mk_and terms in
+            let cert = Lsd.step_cert step, invariant in
+            let pruning = Lsd.mk_pruning_checker in_sys sys in
+            let nontrivial =
+              Fun.protect
+                ~finally:(fun () -> Lsd.kill_pruning pruning)
+                (fun () ->
+                  let nontrivial, _ =
+                    Lsd.query_pruning in_sys pruning [invariant]
+                  in
+                  nontrivial <> [])
+            in
+            if nontrivial then (
+              let invariant =
+                TransSys.add_invariant sys invariant cert false
+              in
+              KEvent.invariant
+                (TransSys.scope_of_trans_sys sys) invariant cert false ;
+              KEvent.log L_note "LLMINV: broadcast %d checked candidate(s)"
+                (List.length terms)
+            ) else
+              KEvent.log L_note "LLMINV: surviving conjunction is transition-trivial" ;
+            if property_survives then (
+              ignore (KEvent.prop_invariant sys prop.Property.prop_name cert) ;
+              KEvent.log L_info "LLMINV: proved %s with checked candidates"
+                prop.Property.prop_name
+            )
+        )
+    )
+
 let main in_sys param sys =
 
   (* Keep the local system up to date and react to termination. Called
@@ -181,12 +272,15 @@ let main in_sys param sys =
     |> say L_note ;
     let result =
       try
-        Ok (Client.chat ~poll
-          ~endpoint:(Flags.Llm.endpoint ()) ~model:(Flags.Llm.model ())
-          ~num_ctx ~max_tokens:(Flags.Llm.max_tokens ())
-          ~think:(Flags.Llm.think ())
-          ~timeout:(Flags.Llm.timeout ())
-          ~system:prompt.system ~user:prompt.user)
+        Ok (match Flags.Llm.replay () with
+          | Some path -> Client.replay path
+          | None ->
+            Client.chat ~poll
+              ~endpoint:(Flags.Llm.endpoint ()) ~model:(Flags.Llm.model ())
+              ~num_ctx ~max_tokens:(Flags.Llm.max_tokens ())
+              ~think:(Flags.Llm.think ())
+              ~timeout:(Flags.Llm.timeout ())
+              ~system:prompt.system ~user:prompt.user)
       with Client.Error msg -> Error msg
     in
     let dir = Flags.Llm.log_dir () in
@@ -199,6 +293,11 @@ let main in_sys param sys =
     let where = match path with Some p -> ", recorded in " ^ p | None -> "" in
     match result with
     | Ok r ->
+      (try check_candidates in_sys sys prop prompt.rendered r.content with
+       | KEvent.Terminate as error -> raise error
+       | error ->
+         say L_warn ("LLMINV: candidate checking failed: "
+                     ^ Printexc.to_string error)) ;
       Printf.sprintf
         "LLMINV: answer for %s after %.1f s (%s prompt tokens, %s \
          generated)%s"

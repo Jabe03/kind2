@@ -1253,6 +1253,7 @@ let mk_printer ~name ~threshold roots =
 type rendered = {
   text : string ;
   goal_text : string ;
+  symbols : (string * Term.t) list ;
   state_count : int ;
   omitted_count : int ;
 }
@@ -1461,9 +1462,32 @@ let render in_sys a prop =
     | Some (`At i) -> location_name i
     | None -> standalone_text ~name goal
   in
+  let symbols =
+    let states =
+      List.filter in_cone all_svars
+      |> List.map (fun sv ->
+        let var =
+          if StateVar.is_const sv then Var.mk_const_state_var sv
+          else Var.mk_state_var_instance sv Numeral.zero
+        in
+        Lib.unquote_smtlib_symbol (name sv), Term.mk_var var)
+    in
+    let locations =
+      List.map (fun i ->
+        let bits =
+          List.mapi (fun k sv ->
+            let var = Var.mk_state_var_instance sv Numeral.zero in
+            if i land (1 lsl k) <> 0 then Term.mk_var var
+            else Term.mk_not (Term.mk_var var)) a.loc_bits
+        in
+        location_name i, Term.mk_and bits) used
+    in
+    states @ locations
+  in
   {
     text = Buffer.contents buf ;
     goal_text ;
+    symbols ;
     state_count = List.length state ;
     omitted_count =
       List.length

@@ -34,6 +34,9 @@ type rendered = {
   (** The system: variables, locations, initial states, transitions *)
   goal_text : string ;
   (** The property as a condition on the state *)
+  symbols : (string * Term.t) list ;
+  (** Unquoted names printed for state variables and locations, resolved to
+      their current-state terms. Duplicate names are retained as ambiguous. *)
   state_count : int ;
   (** Number of state variables printed *)
   omitted_count : int ;

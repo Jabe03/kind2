@@ -27,6 +27,7 @@ type t = {
   system : string ;
   user : string ;
   approx_tokens : int ;
+  rendered : LlmTransSys.rendered ;
 }
 
 (** [mk in_sys analysis sys prop] is the prompt asking for invariants that

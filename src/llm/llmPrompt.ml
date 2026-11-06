@@ -28,6 +28,7 @@ type t = {
   system : string ;
   user : string ;
   approx_tokens : int ;
+  rendered : LlmTransSys.rendered ;
 }
 
 (* Rough, deliberately high count: plain code averages 3 to 4 characters
@@ -109,4 +110,5 @@ let mk in_sys analysis sys prop =
       "Give up to 5 candidate invariants that strengthen it, one per line." ;
     ]
   in
-  { system ; user ; approx_tokens = approx_tokens system + approx_tokens user }
+  { system ; user ; approx_tokens = approx_tokens system + approx_tokens user ;
+    rendered = r }

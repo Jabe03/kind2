@@ -66,3 +66,6 @@ val chat :
   system:string ->
   user:string ->
   response
+
+(** Read one recorded Ollama response body from disk, for offline replay. *)
+val replay : string -> response
