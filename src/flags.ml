@@ -2739,6 +2739,23 @@ module Llm = struct
     )
   let max_tokens () = !max_tokens
 
+  let check_interval_default = 2.0
+  let check_interval = ref check_interval_default
+  let _ = add_spec
+    "--llm_check_interval"
+    (Arg.Set_float check_interval)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>\
+          Seconds between two checks of the candidates found in the text@ \
+          the model is writing. Candidates are batched, and each is only@ \
+          checked once.@ \
+          Default: %.1f\
+        @]"
+        check_interval_default
+    )
+  let check_interval () = !check_interval
+
   let think_default = "auto"
   let think = ref think_default
   let _ = add_spec

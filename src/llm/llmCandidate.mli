@@ -23,3 +23,6 @@ type result = {
 }
 
 val parse : LlmTransSys.rendered -> TransSys.t -> string -> result
+
+(** A line without list numbering, bullet or enclosing backquotes. *)
+val clean_line : string -> string

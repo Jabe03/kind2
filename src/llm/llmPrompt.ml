@@ -57,45 +57,77 @@ let theory_notes sys =
     else [] ;
     if has (fun t -> Type.is_int t || Type.is_int_range t || Type.is_real t)
     then
-      [ "Arithmetic uses +, -, *, div, mod, <, <=, >, >=." ]
+      [ "Arithmetic uses +, -, *, div, mod, <, <=, >, >=. (mod e k) with a \
+         constant k > 0 is always between 0 and k-1, also when e is \
+         negative." ]
     else [] ;
     if has Type.is_array then
       [ "Arrays are read with (select a i)." ]
     else [] ;
   ]
 
-let system_prompt sys =
-  String.concat " " ([
-    "You help the Kind 2 model checker prove that a property holds in every \
-     reachable state of a transition system." ;
-    "The system has an initial condition and a transition relation over its \
-     state variables. x is the value of variable x in the current state, \
-     and x' its value in the next state." ;
-    "Kind 2 tries k-induction, which fails when the property is true but not \
-     inductive: some unreachable state satisfies the property and yet can \
-     step to a state violating it. An invariant that is true of all \
-     reachable states and excludes such states makes the proof go through." ;
-    "A candidate must hold in all the initial states and be preserved by \
-     every transition, possibly with the help of the property and of the \
-     other candidates. Reason on what each transition does to the values of \
-     the variables and, when there are control locations, on what holds at \
-     each location, typically as (=> L3 ...)." ;
-    "Answer with candidate invariants only, one per line, each a Boolean \
-     SMT-LIB term, with no explanation and no numbering." ;
-    "A candidate may only mention state variables, in their current value, \
-     and location names. It never mentions next values (x'), inputs, or \
-     abbreviations such as _e1." ;
-  ] @ theory_notes sys)
+(* Whether [sub] occurs in [s] *)
+let contains s sub =
+  let n = String.length s and m = String.length sub in
+  let rec at i = i + m <= n && (String.sub s i m = sub || at (i + 1)) in
+  at 0
+
+(* The instructions only mention what the system has: models spend their
+   reasoning on whatever the prompt mentions, relevant or not. They also
+   settle in advance the questions models otherwise keep asking themselves
+   (how many candidates, whether an operator exists, what the rules mean),
+   which can use up the whole token budget before any answer. *)
+let system_prompt sys (r : LlmTransSys.rendered) =
+  let has_locations = contains r.text "## Control locations" in
+  let has_inputs = contains r.text "## Inputs" in
+  let only_if c l = if c then l else [] in
+  let allowed =
+    Printf.sprintf
+      "A candidate may only mention state variables, in their current \
+       value%s. It never mentions next values (v'), %sabbreviations such as \
+       _e1, or quantifiers."
+      (if has_locations then ", and location names" else "")
+      (if has_inputs then "inputs, " else "")
+  in
+  String.concat " " (List.concat [
+    [ "You help the Kind 2 model checker prove that a property holds in \
+       every reachable state of a transition system." ;
+      "The system has an initial condition and a transition relation over \
+       its state variables. For a variable v, v is its value in the current \
+       state and v' its value in the next state." ] ;
+    only_if has_inputs [
+      "Inputs take an arbitrary value at each step, which a transition reads \
+       as v'. They are not part of the state." ] ;
+    [ "Kind 2 tries k-induction, which fails when the property is true but \
+       not inductive: some unreachable state satisfies the property and yet \
+       can step to a state violating it. An invariant that is true of all \
+       reachable states and excludes such states makes the proof go \
+       through." ;
+      "A candidate must hold in all the initial states and be preserved by \
+       every transition, possibly with the help of the property and of the \
+       other candidates. Reason on what each transition does to the values \
+       of the variables." ] ;
+    only_if has_locations [
+      "With control locations, reason on what holds at each location, \
+       typically as (=> L3 ...)." ] ;
+    [ "Every candidate is checked by a solver, and one that is false or \
+       malformed is simply discarded: do not spend time re-checking the \
+       rules or the syntax. As soon as you have candidates that hold \
+       initially and are preserved by every transition, give your answer." ;
+      "Answer with 1 to 5 distinct candidate invariants, one per line, each \
+       a Boolean SMT-LIB term, with no explanation and no numbering. A \
+       single strong candidate is enough." ;
+      allowed ] ;
+    theory_notes sys ;
+  ])
 
 let mk in_sys analysis sys prop =
   let r = LlmTransSys.render in_sys analysis prop in
-  let system = system_prompt sys in
+  let system = system_prompt sys r in
   let omitted =
     if r.omitted_count = 0 then ""
     else
-      Printf.sprintf
-        "State variables that the property does not depend on are left out \
-         (%d of them).\n\n" r.omitted_count
+      "State variables that cannot affect the goal are not shown.\n\n"
   in
   let user =
     String.concat "" [
@@ -107,7 +139,8 @@ let mk in_sys analysis sys prop =
       r.goal_text ;
       "\n\nThis is not inductive on its own.\n\n" ;
       "# Request\n\n" ;
-      "Give up to 5 candidate invariants that strengthen it, one per line." ;
+      "Give 1 to 5 distinct candidate invariants that strengthen it, one per \
+       line." ;
     ]
   in
   { system ; user ; approx_tokens = approx_tokens system + approx_tokens user ;

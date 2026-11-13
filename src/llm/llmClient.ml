@@ -37,6 +37,10 @@ module U = Yojson.Safe.Util
 
 exception Error of string
 
+(* Raised by a callback of [chat] to end the request early, with what the
+   model produced so far *)
+exception Stop
+
 let error fmt = Format.kasprintf (fun s -> raise (Error s)) fmt
 
 type response = {
@@ -124,27 +128,33 @@ let send_all fd s =
   in
   loop 0
 
-(* Read until the server closes the connection or the deadline, and tell
-   which. [poll] is called about every [slice] seconds; it may raise to
-   abandon the request. *)
-let recv_all ~poll ~deadline fd =
+(* Read until the server closes the connection, the deadline, or a callback
+   raises [Stop], and tell which. [poll] is called about every [slice]
+   seconds and [on_data] with each piece received; either may raise [Stop]
+   to end the request, or anything else to abandon it. *)
+let recv_all ~poll ~on_data ~deadline fd =
   let buf = Buffer.create 65536 in
   let chunk = Bytes.create 65536 in
   let slice = 0.1 in
   let rec loop () =
     poll () ;
-    if Unix.gettimeofday () > deadline then true
+    if Unix.gettimeofday () > deadline then `Timeout
     else
       match Unix.select [ fd ] [] [] slice with
       | [], _, _ -> loop ()
       | _ ->
         let n = Unix.recv fd chunk 0 (Bytes.length chunk) [] in
-        if n > 0 then (Buffer.add_subbytes buf chunk 0 n ; loop ())
-        else false
+        if n > 0 then (
+          let piece = Bytes.sub_string chunk 0 n in
+          Buffer.add_string buf piece ;
+          on_data piece ;
+          loop ()
+        )
+        else `Done
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
   in
-  let timed_out = loop () in
-  Buffer.contents buf, timed_out
+  let ending = try loop () with Stop -> `Stopped in
+  Buffer.contents buf, ending
 
 let split_http_response resp =
   let sep = "\r\n\r\n" in
@@ -172,7 +182,7 @@ let split_http_response resp =
 
 (* The answer from its lines: the text of the lines adds up, and the last
    one has the statistics. A last line cut by a timeout is ignored. *)
-let parse_body ~wall_seconds ~timed_out body =
+let parse_body ~wall_seconds ~ending body =
   let opt f x = try f x with U.Type_error _ -> None in
   let lines =
     String.split_on_char '\n' body
@@ -181,7 +191,7 @@ let parse_body ~wall_seconds ~timed_out body =
       else try Some (J.from_string l) with Yojson.Json_error _ -> None)
   in
   if lines = [] then
-    error (if timed_out then "request timed out before any answer"
+    error (if ending = `Timeout then "request timed out before any answer"
            else "answer is not JSON") ;
   let content = Buffer.create 1024 and thinking = Buffer.create 4096 in
   List.iter (fun json ->
@@ -206,20 +216,72 @@ let parse_body ~wall_seconds ~timed_out body =
     prompt_tokens = opt U.to_int_option (U.member "prompt_eval_count" last) ;
     completion_tokens = opt U.to_int_option (U.member "eval_count" last) ;
     done_reason =
-      if timed_out then Some "timeout"
-      else opt U.to_string_option (U.member "done_reason" last) ;
+      ( match ending with
+        | `Timeout -> Some "timeout"
+        | `Stopped -> Some "stopped"
+        | `Done -> opt U.to_string_option (U.member "done_reason" last) ) ;
     server_seconds ; wall_seconds ; raw = body ;
   }
 
 let replay path =
   let body = In_channel.with_open_bin path In_channel.input_all in
-  parse_body ~wall_seconds:0.0 ~timed_out:false body
+  parse_body ~wall_seconds:0.0 ~ending:`Done body
 
-(* Send one chat request and wait for the answer. A timeout gives what the
-   model produced so far. Raises [Error] on any other failure; exceptions
-   raised by [poll] (termination) go through, and in every case the socket
-   is closed. *)
-let chat ~poll ~endpoint ~model ~num_ctx ~max_tokens ~think ~timeout
+(* Decoder of the streamed answer: the bytes received are cut into the lines
+   of the body, each a JSON object, whose pieces of text are passed on as
+   they come. *)
+let stream_decoder on_text =
+  let headers_done = ref false in
+  let pending = Buffer.create 4096 in
+  let line json =
+    let message = U.member "message" json in
+    let text key =
+      try Option.value ~default:"" (U.to_string_option (U.member key message))
+      with U.Type_error _ -> ""
+    in
+    let thinking = text "thinking" and content = text "content" in
+    if thinking <> "" || content <> "" then on_text ~thinking ~content
+  in
+  let rec lines () =
+    let s = Buffer.contents pending in
+    match String.index_opt s '\n' with
+    | None -> ()
+    | Some i ->
+      Buffer.clear pending ;
+      Buffer.add_string pending (String.sub s (i + 1) (String.length s - i - 1)) ;
+      let l = String.trim (String.sub s 0 i) in
+      ( if l <> "" then
+          match J.from_string l with
+          | json -> line json
+          | exception Yojson.Json_error _ -> () ) ;
+      lines ()
+  in
+  fun piece ->
+    Buffer.add_string pending piece ;
+    if not !headers_done then (
+      let s = Buffer.contents pending in
+      let sep = "\r\n\r\n" in
+      let n = String.length s in
+      let rec find i =
+        if i + 4 > n then None
+        else if String.sub s i 4 = sep then Some i
+        else find (i + 1)
+      in
+      match find 0 with
+      | None -> ()
+      | Some i ->
+        headers_done := true ;
+        Buffer.clear pending ;
+        Buffer.add_string pending (String.sub s (i + 4) (n - i - 4))
+    ) ;
+    if !headers_done then lines ()
+
+(* Send one chat request and wait for the answer, passing each piece of its
+   text to [on_text] as it arrives. A timeout gives what the model produced
+   so far, and so does [Stop] raised by [on_text] or [poll]. Raises [Error]
+   on any other failure; other exceptions of [poll] (termination) go
+   through, and in every case the socket is closed, which stops the model. *)
+let chat ~on_text ~poll ~endpoint ~model ~num_ctx ~max_tokens ~think ~timeout
     ~system ~user =
   let host, port, prefix = parse_endpoint endpoint in
   let body = request_body ~model ~num_ctx ~max_tokens ~think ~system ~user in
@@ -235,18 +297,19 @@ let chat ~poll ~endpoint ~model ~num_ctx ~max_tokens ~think ~timeout
   in
   let start = Unix.gettimeofday () in
   let fd = connect host port in
-  let resp, timed_out =
+  let on_data = stream_decoder on_text in
+  let resp, ending =
     Fun.protect ~finally:(fun () -> try Unix.close fd with _ -> ())
       (fun () ->
         try
           send_all fd request ;
-          recv_all ~poll ~deadline:(start +. timeout) fd
+          recv_all ~poll ~on_data ~deadline:(start +. timeout) fd
         with Unix.Unix_error (e, f, _) ->
           error "%s: %s" f (String.trim (Unix.error_message e)))
   in
   let wall_seconds = Unix.gettimeofday () -. start in
   match split_http_response resp with
-  | Some 200, body -> parse_body ~wall_seconds ~timed_out body
+  | Some 200, body -> parse_body ~wall_seconds ~ending body
   | status, body ->
     let msg =
       try J.from_string body |> U.member "error" |> U.to_string

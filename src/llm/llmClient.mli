@@ -24,6 +24,11 @@
     malformed answer. *)
 exception Error of string
 
+(** Raised by a callback of {!chat} to end the request early: [chat] then
+    returns what the model produced so far, with the stop reason
+    ["stopped"]. *)
+exception Stop
+
 (** Answer to a chat request. *)
 type response = {
   content : string ;
@@ -38,7 +43,8 @@ type response = {
   done_reason : string option ;
   (** Why generation stopped: ["stop"] when the model finished, ["length"]
       when it ran out of context or token budget, ["timeout"] when the time
-      ran out. In the last two cases the answer is cut short or empty. *)
+      ran out, ["stopped"] when a callback raised {!Stop}. In all but the
+      first case the answer is cut short or empty. *)
   server_seconds : float option ;
   (** Total time reported by the server *)
   wall_seconds : float ;
@@ -47,15 +53,18 @@ type response = {
   (** Body of the HTTP response *)
 }
 
-(** [chat ~poll ~endpoint ~model ~num_ctx ~max_tokens ~think ~timeout ~system
-    ~user] sends one request to [endpoint/api/chat] and waits for the answer,
-    calling [poll] about every 100 ms. After [timeout] seconds it returns what
-    the model produced so far. An exception raised by
-    [poll] abandons the request and closes the connection, which stops
-    the generation on the server.
+(** [chat ~on_text ~poll ~endpoint ~model ~num_ctx ~max_tokens ~think
+    ~timeout ~system ~user] sends one request to [endpoint/api/chat] and
+    waits for the answer, calling [on_text] with each new piece of the
+    thinking and of the answer as it arrives, and [poll] about every 100 ms.
+    After [timeout] seconds, or when [on_text] or [poll] raises {!Stop}, it
+    returns what the model produced so far. Any other exception raised by a
+    callback abandons the request. In every case the connection is closed,
+    which stops the generation on the server.
 
     @raise Error on any failure of the request. *)
 val chat :
+  on_text:(thinking:string -> content:string -> unit) ->
   poll:(unit -> unit) ->
   endpoint:string ->
   model:string ->

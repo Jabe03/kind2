@@ -19,8 +19,10 @@
 (* LLM-based invariant generation engine (LLMINV).
 
   For each property that is still unknown, ask the model for candidate
-  invariants, record the exchange, then parse, check and broadcast only
-  sound candidates. Multi-round feedback remains future work.
+  invariants. Candidates are read from the thinking and the answer as they
+  arrive, and checked and broadcast without waiting for the end (see
+  {!LlmStream}): the request ends as soon as the property is proved.
+  Multi-round feedback remains future work.
 
    All the state of the engine is local to [main]: an engine abandoned
    at the end of an analysis may still be running when the next
@@ -28,7 +30,6 @@
 
 module Client = LlmClient
 module Prompt = LlmPrompt
-module Lsd = LockStepDriver
 
 let on_exit _ = ()
 
@@ -60,7 +61,7 @@ let opt_int = function Some i -> string_of_int i | None -> "?"
 
 (* Write one exchange as Markdown, and the raw answer as JSON next to
    it. Returns the path of the Markdown file. *)
-let record ~dir ~prop ~(prompt : Prompt.t) result =
+let record ~dir ~prop ~(prompt : Prompt.t) ~checking result =
   mkdir_p dir ;
   let base =
     Filename.concat dir
@@ -90,7 +91,9 @@ let record ~dir ~prop ~(prompt : Prompt.t) result =
           | Some t -> p "\n## Model thinking\n\n%s\n" t
           | None -> () ) ;
         p "\n## Model answer\n\n%s\n" r.content
-      | Error _ -> () )
+      | Error _ -> () ) ;
+    if checking <> "" then
+      p "\n## Checking of the candidates\n\n%s\n" checking
   ) ;
   ( match result with
     | Ok r ->
@@ -155,102 +158,6 @@ let print_exchange ~name ~(prompt : Prompt.t) ~path result =
     in
     eprint "\n===== LLMINV: %s =====\n%s%s%s\n" name prompts body record
 
-let check_candidates in_sys sys prop rendered answer =
-  let parsed = LlmCandidate.parse rendered sys answer in
-  List.iter (fun (text, reason) ->
-    KEvent.log L_debug "LLMINV: rejected candidate %S: %s" text reason
-  ) parsed.rejected ;
-  KEvent.log L_note "LLMINV: parsed %d candidates, rejected %d"
-    (List.length parsed.terms) (List.length parsed.rejected) ;
-  match parsed.terms with
-  | [] -> ()
-  | candidates ->
-    let base_holds term =
-      let base = Lsd.mk_base_checker in_sys sys Numeral.zero in
-      Fun.protect
-        ~finally:(fun () -> Lsd.kill_base base)
-        (fun () -> Lsd.query_base in_sys base [term] = None)
-    in
-    let base_candidates =
-      List.filter (fun term ->
-        try base_holds term with error ->
-          KEvent.log L_debug "LLMINV: base check rejected candidate: %s"
-            (Printexc.to_string error) ;
-          false
-      ) candidates
-    in
-    if base_candidates = [] then (
-      KEvent.log L_note "LLMINV: no candidate holds in every initial state"
-    ) else (
-      let prop_term = prop.Property.prop_term in
-      let prop_base =
-        try base_holds prop_term with error ->
-          KEvent.log L_warn "LLMINV: cannot check initial property: %s"
-            (Printexc.to_string error) ;
-          false
-      in
-      let candidates =
-        if prop_base then base_candidates @ [prop_term] else base_candidates
-      in
-      let base = Lsd.mk_base_checker in_sys sys Numeral.zero in
-      let step =
-        try Lsd.to_step base with error ->
-          Lsd.kill_base base ;
-          raise error
-      in
-      Fun.protect
-        ~finally:(fun () -> Lsd.kill_step step)
-        (fun () ->
-          let survivors =
-            Lsd.query_step false in_sys step
-              (List.map (fun term -> term, ()) candidates)
-            |> List.map fst
-          in
-          let property_survives =
-            prop_base && List.exists (Term.equal prop_term) survivors
-          in
-          let invariant_terms =
-            if property_survives then survivors
-            else List.filter (fun term -> not (Term.equal term prop_term)) survivors
-          in
-          match invariant_terms with
-          | [] -> KEvent.log L_note "LLMINV: no inductive candidate survived"
-          | terms ->
-            let invariant = Term.mk_and terms in
-            let cert = Lsd.step_cert step, invariant in
-            let pruning = Lsd.mk_pruning_checker in_sys sys in
-            let nontrivial =
-              Fun.protect
-                ~finally:(fun () -> Lsd.kill_pruning pruning)
-                (fun () ->
-                  let nontrivial, _ =
-                    Lsd.query_pruning in_sys pruning [invariant]
-                  in
-                  nontrivial <> [])
-            in
-            if nontrivial then (
-              let invariant =
-                TransSys.add_invariant sys invariant cert false
-              in
-              KEvent.invariant
-                (TransSys.scope_of_trans_sys sys) invariant cert false ;
-              KEvent.log L_note "LLMINV: broadcast %d checked candidate(s)"
-                (List.length terms)
-            ) else
-              KEvent.log L_note "LLMINV: surviving conjunction is transition-trivial" ;
-            if property_survives then (
-              ignore (KEvent.prop_invariant sys prop.Property.prop_name cert) ;
-              let candidate_terms =
-                List.filter (fun term -> not (Term.equal term prop_term)) terms
-              in
-              LlmUse.record_proved
-                ~prop:prop.Property.prop_name ~terms:candidate_terms ;
-              KEvent.log L_info "LLMINV: proved %s with checked candidates"
-                prop.Property.prop_name
-            )
-        )
-    )
-
 let main in_sys param sys =
 
   (* Keep the local system up to date and react to termination. Called
@@ -275,22 +182,69 @@ let main in_sys param sys =
     Printf.sprintf "LLMINV: asking %s about %s (about %d tokens)"
       (Flags.Llm.model ()) name prompt.approx_tokens
     |> say L_note ;
-    let result =
-      try
-        Ok (match Flags.Llm.replay () with
-          | Some path -> Client.replay path
-          | None ->
-            Client.chat ~poll
-              ~endpoint:(Flags.Llm.endpoint ()) ~model:(Flags.Llm.model ())
-              ~num_ctx ~max_tokens:(Flags.Llm.max_tokens ())
-              ~think:(Flags.Llm.think ())
-              ~timeout:(Flags.Llm.timeout ())
-              ~system:prompt.system ~user:prompt.user)
-      with Client.Error msg -> Error msg
+    let session =
+      LlmStream.create ~interval:(Flags.Llm.check_interval ())
+        in_sys sys prop prompt.rendered
     in
+    (* Candidates are checked as they arrive, and the request stops when the
+       property is proved. A failure to check never ends the engine. *)
+    let checking f =
+      try f () with
+      | Client.Stop -> raise Client.Stop
+      | KEvent.Terminate as e -> raise e
+      (* Solvers killed under the engine while the analysis ends *)
+      | e when EngineDomains.is_terminating () -> raise e
+      | e ->
+        say L_warn
+          ("LLMINV: candidate checking failed: " ^ Printexc.to_string e)
+    in
+    let on_text ~thinking ~content =
+      checking (fun () ->
+        LlmStream.feed session ~thinking ~content ;
+        LlmStream.maybe_check session)
+    in
+    let poll_and_check () =
+      poll () ;
+      checking (fun () -> LlmStream.maybe_check session)
+    in
+    let result =
+      Fun.protect ~finally:(fun () -> LlmStream.close session) (fun () ->
+        let result =
+          try
+            Ok (match Flags.Llm.replay () with
+              | Some path ->
+                let r = Client.replay path in
+                ( try
+                    on_text
+                      ~thinking:(Option.value ~default:"" r.thinking)
+                      ~content:r.content
+                  with Client.Stop -> () ) ;
+                r
+              | None ->
+                Client.chat ~on_text ~poll:poll_and_check
+                  ~endpoint:(Flags.Llm.endpoint ()) ~model:(Flags.Llm.model ())
+                  ~num_ctx ~max_tokens:(Flags.Llm.max_tokens ())
+                  ~think:(Flags.Llm.think ())
+                  ~timeout:(Flags.Llm.timeout ())
+                  ~system:prompt.system ~user:prompt.user)
+          with Client.Error msg -> Error msg
+        in
+        (* What is left once the model is done *)
+        ( match result with
+          | Ok _ when not (LlmStream.proved session) ->
+            ( try
+                checking (fun () ->
+                  LlmStream.flush session ;
+                  LlmStream.maybe_check ~force:true session)
+              with Client.Stop -> () )
+          | _ -> () ) ;
+        result)
+    in
+    let checking = LlmStream.summary session in
+    KEvent.log L_info "@[<v>LLMINV: candidates for %s:@,%s@]" name checking ;
     let dir = Flags.Llm.log_dir () in
     let path =
-      try Some (record ~dir ~prop:name ~prompt result)
+      try Some (record ~dir ~prop:name ~prompt ~checking result)
       with Sys_error msg ->
         KEvent.log L_warn "LLMINV: cannot write to %s: %s" dir msg ;
         None
@@ -298,18 +252,9 @@ let main in_sys param sys =
     let where = match path with Some p -> ", recorded in " ^ p | None -> "" in
     match result with
     | Ok r ->
-      poll () ;
-      let prop_name = prop.Property.prop_name in
-      if Property.prop_status_known (TransSys.get_prop_status sys prop_name) then
-        KEvent.log L_note
-          "LLMINV: skipping %s; another engine settled it while the model was running"
-          prop_name
-      else
-        (try check_candidates in_sys sys prop prompt.rendered r.content with
-         | KEvent.Terminate as error -> raise error
-         | error ->
-           say L_warn ("LLMINV: candidate checking failed: "
-                       ^ Printexc.to_string error)) ;
+      if LlmStream.proved session then
+        Printf.sprintf "LLMINV: proved %s with the model's candidates" name
+        |> say L_note ;
       Printf.sprintf
         "LLMINV: answer for %s after %.1f s (%s prompt tokens, %s \
          generated)%s"

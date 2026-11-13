@@ -842,6 +842,9 @@ module Llm : sig
   (** Maximal number of tokens generated for one request. *)
   val max_tokens : unit -> int
 
+  (** Seconds between two checks of the candidates read so far. *)
+  val check_interval : unit -> float
+
   (** Whether to ask a reasoning model to think; [None] for the model's
       default. *)
   val think : unit -> bool option
