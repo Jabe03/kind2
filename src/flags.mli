@@ -861,6 +861,9 @@ module Llm : sig
 
   (** Recorded Ollama response body to use instead of contacting the server. *)
   val replay : unit -> string option
+
+  (** Whether to report LLM candidate usefulness from minimized certificates. *)
+  val usefulness : unit -> bool
 end
 
 

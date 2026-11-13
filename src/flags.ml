@@ -2657,7 +2657,9 @@ module Llm = struct
       candidate invariants. The engine is experimental and inactive by@ \
       default; enable it with --enable LLMINV. Candidate terms are parsed,@ \
       checked with SMT and only sound invariants are shared. Use@ \
-      --llm_replay to test a recorded response without a server.\
+      --llm_replay to test a recorded response without a server, and@ \
+      --llm_usefulness to report candidates retained by certificate@ \
+      minimization after all engines stop.\
     @]"
 
   let endpoint_default = "http://127.0.0.1:11434"
@@ -2844,6 +2846,16 @@ module Llm = struct
         "@[<v>Read one recorded Ollama response JSON instead of contacting the server@]"
     )
   let replay () = !replay_file
+
+  let usefulness = ref false
+  let _ = add_spec
+    "--llm_usefulness"
+    (bool_arg usefulness)
+    (fun fmt ->
+      Format.fprintf fmt
+        "@[<v>After engines stop, minimize proof certificates and report whether LLM candidates were needed@]"
+    )
+  let usefulness () = !usefulness
 end
 
 

@@ -971,6 +971,7 @@ let analyze msg_setup save_results ignore_props stop_if_falsified slice_to_prop 
          had established carried over (see [RecUnrolling]). Returns the
          parameter and the system the engines ran on last. *)
       let rec run_engines param sys =
+        LlmUse.reset () ;
         RecUnrolling.start_round sys ;
 
         (* Get rid of messages from the previous analysis. *)
@@ -1010,7 +1011,9 @@ let analyze msg_setup save_results ignore_props stop_if_falsified slice_to_prop 
         |> slaughter_kids `Supervisor ;
 
         match requested with
-        | [] -> param, sys
+        | [] ->
+          LlmUse.report sys ;
+          param, sys
         | functions ->
           (* A fresh uid: the symbols and state variables of a system are
              named after the uid of its analysis, and the system is built

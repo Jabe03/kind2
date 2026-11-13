@@ -240,6 +240,11 @@ let check_candidates in_sys sys prop rendered answer =
               KEvent.log L_note "LLMINV: surviving conjunction is transition-trivial" ;
             if property_survives then (
               ignore (KEvent.prop_invariant sys prop.Property.prop_name cert) ;
+              let candidate_terms =
+                List.filter (fun term -> not (Term.equal term prop_term)) terms
+              in
+              LlmUse.record_proved
+                ~prop:prop.Property.prop_name ~terms:candidate_terms ;
               KEvent.log L_info "LLMINV: proved %s with checked candidates"
                 prop.Property.prop_name
             )
@@ -293,11 +298,18 @@ let main in_sys param sys =
     let where = match path with Some p -> ", recorded in " ^ p | None -> "" in
     match result with
     | Ok r ->
-      (try check_candidates in_sys sys prop prompt.rendered r.content with
-       | KEvent.Terminate as error -> raise error
-       | error ->
-         say L_warn ("LLMINV: candidate checking failed: "
-                     ^ Printexc.to_string error)) ;
+      poll () ;
+      let prop_name = prop.Property.prop_name in
+      if Property.prop_status_known (TransSys.get_prop_status sys prop_name) then
+        KEvent.log L_note
+          "LLMINV: skipping %s; another engine settled it while the model was running"
+          prop_name
+      else
+        (try check_candidates in_sys sys prop prompt.rendered r.content with
+         | KEvent.Terminate as error -> raise error
+         | error ->
+           say L_warn ("LLMINV: candidate checking failed: "
+                       ^ Printexc.to_string error)) ;
       Printf.sprintf
         "LLMINV: answer for %s after %.1f s (%s prompt tokens, %s \
          generated)%s"
