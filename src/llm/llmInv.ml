@@ -61,7 +61,9 @@ let opt_int = function Some i -> string_of_int i | None -> "?"
 
 (* Write one exchange as Markdown, and the raw answer as JSON next to
    it. Returns the path of the Markdown file. *)
-let record ~dir ~prop ~(prompt : Prompt.t) ~checking result =
+(* Also writes, next to the record, the request body exactly as it was sent
+   ([request], absent for a replay) and the server's raw answer. *)
+let record ~dir ~prop ~(prompt : Prompt.t) ~request ~checking result =
   mkdir_p dir ;
   let base =
     Filename.concat dir
@@ -95,6 +97,9 @@ let record ~dir ~prop ~(prompt : Prompt.t) ~checking result =
     if checking <> "" then
       p "\n## Checking of the candidates\n\n%s\n" checking
   ) ;
+  Option.iter (fun body ->
+    Out_channel.with_open_bin (base ^ ".request.json") (fun oc ->
+      output_string oc body)) request ;
   ( match result with
     | Ok r ->
       Out_channel.with_open_bin (base ^ ".json") (fun oc ->
@@ -207,12 +212,23 @@ let main in_sys param sys =
       poll () ;
       checking (fun () -> LlmStream.maybe_check session)
     in
+    (* The request exactly as it is sent, also written to the record. None
+       is sent when the answer is replayed. *)
+    let request =
+      match Flags.Llm.replay () with
+      | Some _ -> None
+      | None ->
+        Some (Client.request_body ~model:(Flags.Llm.model ())
+                ~num_ctx ~max_tokens:(Flags.Llm.max_tokens ())
+                ~think:(Flags.Llm.think ())
+                ~system:prompt.system ~user:prompt.user)
+    in
     let result =
       Fun.protect ~finally:(fun () -> LlmStream.close session) (fun () ->
         let result =
           try
-            Ok (match Flags.Llm.replay () with
-              | Some path ->
+            Ok (match Flags.Llm.replay (), request with
+              | Some path, _ ->
                 let r = Client.replay path in
                 ( try
                     on_text
@@ -220,13 +236,11 @@ let main in_sys param sys =
                       ~content:r.content
                   with Client.Stop -> () ) ;
                 r
-              | None ->
+              | None, Some body ->
                 Client.chat ~on_text ~poll:poll_and_check
-                  ~endpoint:(Flags.Llm.endpoint ()) ~model:(Flags.Llm.model ())
-                  ~num_ctx ~max_tokens:(Flags.Llm.max_tokens ())
-                  ~think:(Flags.Llm.think ())
-                  ~timeout:(Flags.Llm.timeout ())
-                  ~system:prompt.system ~user:prompt.user)
+                  ~endpoint:(Flags.Llm.endpoint ())
+                  ~timeout:(Flags.Llm.timeout ()) ~body
+              | None, None -> assert false)
           with Client.Error msg -> Error msg
         in
         (* What is left once the model is done *)
@@ -244,7 +258,7 @@ let main in_sys param sys =
     KEvent.log L_info "@[<v>LLMINV: candidates for %s:@,%s@]" name checking ;
     let dir = Flags.Llm.log_dir () in
     let path =
-      try Some (record ~dir ~prop:name ~prompt ~checking result)
+      try Some (record ~dir ~prop:name ~prompt ~request ~checking result)
       with Sys_error msg ->
         KEvent.log L_warn "LLMINV: cannot write to %s: %s" dir msg ;
         None

@@ -281,10 +281,8 @@ let stream_decoder on_text =
    so far, and so does [Stop] raised by [on_text] or [poll]. Raises [Error]
    on any other failure; other exceptions of [poll] (termination) go
    through, and in every case the socket is closed, which stops the model. *)
-let chat ~on_text ~poll ~endpoint ~model ~num_ctx ~max_tokens ~think ~timeout
-    ~system ~user =
+let chat ~on_text ~poll ~endpoint ~timeout ~body =
   let host, port, prefix = parse_endpoint endpoint in
-  let body = request_body ~model ~num_ctx ~max_tokens ~think ~system ~user in
   let request =
     Printf.sprintf
       "POST %s/api/chat HTTP/1.0\r\n\

@@ -53,27 +53,35 @@ type response = {
   (** Body of the HTTP response *)
 }
 
-(** [chat ~on_text ~poll ~endpoint ~model ~num_ctx ~max_tokens ~think
-    ~timeout ~system ~user] sends one request to [endpoint/api/chat] and
-    waits for the answer, calling [on_text] with each new piece of the
-    thinking and of the answer as it arrives, and [poll] about every 100 ms.
-    After [timeout] seconds, or when [on_text] or [poll] raises {!Stop}, it
-    returns what the model produced so far. Any other exception raised by a
-    callback abandons the request. In every case the connection is closed,
-    which stops the generation on the server.
+(** [request_body ~model ~num_ctx ~max_tokens ~think ~system ~user] is the
+    JSON body of a chat request: the system and user messages, the model, the
+    context size, the token cap and, unless [think] is [None], whether to
+    think. *)
+val request_body :
+  model:string ->
+  num_ctx:int ->
+  max_tokens:int ->
+  think:bool option ->
+  system:string ->
+  user:string ->
+  string
+
+(** [chat ~on_text ~poll ~endpoint ~timeout ~body] posts [body] (see
+    {!request_body}) to [endpoint/api/chat] as it is, and waits for the
+    answer, calling [on_text] with each new piece of the thinking and of the
+    answer as it arrives, and [poll] about every 100 ms. After [timeout]
+    seconds, or when [on_text] or [poll] raises {!Stop}, it returns what the
+    model produced so far. Any other exception raised by a callback abandons
+    the request. In every case the connection is closed, which stops the
+    generation on the server.
 
     @raise Error on any failure of the request. *)
 val chat :
   on_text:(thinking:string -> content:string -> unit) ->
   poll:(unit -> unit) ->
   endpoint:string ->
-  model:string ->
-  num_ctx:int ->
-  max_tokens:int ->
-  think:bool option ->
   timeout:float ->
-  system:string ->
-  user:string ->
+  body:string ->
   response
 
 (** Read one recorded Ollama response body from disk, for offline replay. *)

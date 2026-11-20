@@ -256,7 +256,7 @@ module Symbol_node = struct
     | `BVSLE, `BVSLE
     | `BVSGT, `BVSGT
     | `BVSGE, `BVSGE
-    | `BVCONCAT, `BVCONCAT
+    | `BVCONCAT, `BVCONCAT -> true
 
     | `TRUE, _
     | `FALSE, _
